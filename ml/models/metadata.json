@@ -1,0 +1,22 @@
+{
+  "feature_columns": [
+    "home_win_rate",
+    "away_win_rate",
+    "home_goal_difference",
+    "away_goal_difference",
+    "home_points_per_game",
+    "away_points_per_game",
+    "attack_strength_home",
+    "defense_strength_home",
+    "attack_strength_away",
+    "defense_strength_away",
+    "home_form",
+    "away_form",
+    "home_avg_goals_for",
+    "home_avg_goals_against",
+    "away_avg_goals_for",
+    "away_avg_goals_against"
+  ],
+  "model_version": "1.0.0",
+  "trained_at": "2025-07-28T00:18:19.191173"
+}
