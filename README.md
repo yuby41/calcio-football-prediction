@@ -12,6 +12,8 @@ A Laravel-based football betting application that uses Machine Learning to predi
 - **Performance Analytics**: Detailed accuracy metrics and trends
 - **Live Match Broadcasting**: Event-driven updates for live scores and statistics
 - **API Endpoints**: RESTful APIs for real-time data access
+- **Budget Management**: Advanced bankroll strategies including Mansaniello, Fibonacci, Martingale
+- **Risk Control**: Automatic bet sizing based on ML confidence and strategy parameters
 
 ## 🛠️ Tech Stack
 
@@ -106,6 +108,32 @@ php artisan statistics:update-sql
 - **Matches** (/matches) - All matches with filtering and live updates
 - **Teams** (/teams) - Team statistics and profiles  
 - **Statistics** (/statistics) - Prediction accuracy analytics with real-time updates
+- **Budget** (/budget) - Advanced bankroll management with multiple strategies
+
+## 💰 Budget Management System
+
+### Estrategias Disponibles
+- **Mansaniello**: Progresión controlada con secuencia específica (1,1,2,2,3,4,5,7,9,12...)
+- **Fibonacci**: Secuencia matemática clásica (1,1,2,3,5,8,13,21...)
+- **Martingala Limitada**: Duplicación con límites de seguridad
+- **Apuesta Fija**: Cantidad constante por apuesta
+- **Porcentaje Kelly**: Ajuste automático según confianza de la IA
+
+### Gestión de Riesgo
+- Límite máximo por apuesta (% del bankroll)
+- Confianza mínima requerida de la IA
+- Control automático de secuencias
+- Historial completo de transacciones
+- Métricas de rendimiento (ROI, Win Rate, Drawdown)
+
+### Comandos de Budget
+```bash
+# Crear configuración de ejemplo
+php artisan budget:create-sample --amount=500
+
+# Ver todas las configuraciones
+curl http://localhost:8000/budget
+```
 
 ## 🔗 API Endpoints
 

@@ -20,6 +20,18 @@ Route::get('/statistics/league-data', [StatisticsController::class, 'leagueData'
 Route::get('/statistics/detail-data', [StatisticsController::class, 'detailData'])->name('statistics.detail-data');
 Route::get('/statistics/refresh', [StatisticsController::class, 'refresh'])->name('statistics.refresh');
 
+// Budget Management routes
+Route::prefix('budget')->name('budget.')->group(function () {
+    Route::get('/', [App\Http\Controllers\BudgetController::class, 'index'])->name('index');
+    Route::get('/create', [App\Http\Controllers\BudgetController::class, 'create'])->name('create');
+    Route::post('/', [App\Http\Controllers\BudgetController::class, 'store'])->name('store');
+    Route::get('/{budget}', [App\Http\Controllers\BudgetController::class, 'show'])->name('show');
+    Route::post('/{budget}/bet', [App\Http\Controllers\BudgetController::class, 'placeBet'])->name('place-bet');
+    Route::post('/{budget}/resolve', [App\Http\Controllers\BudgetController::class, 'resolveBets'])->name('resolve-bets');
+    Route::get('/{budget}/chart-data', [App\Http\Controllers\BudgetController::class, 'chartData'])->name('chart-data');
+    Route::get('/{budget}/opportunities', [App\Http\Controllers\BudgetController::class, 'opportunities'])->name('opportunities');
+});
+
 // API Routes for live updates
 Route::prefix('api')->group(function () {
     Route::get('/live/matches', [App\Http\Controllers\Api\LiveUpdatesController::class, 'matches'])->name('api.live.matches');
