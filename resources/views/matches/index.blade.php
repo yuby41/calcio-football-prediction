@@ -64,7 +64,7 @@
         @if($matches->count() > 0)
             <ul class="divide-y divide-gray-200">
                 @foreach($matches as $match)
-                <li>
+                <li data-match-id="{{ $match->id }}" data-status="{{ $match->status }}">
                     <a href="{{ route('matches.show', $match) }}" class="block hover:bg-gray-50">
                         <div class="px-4 py-4 sm:px-6">
                             <div class="flex items-center justify-between">
@@ -79,9 +79,9 @@
                                     </div>
                                     
                                     <div class="text-center">
-                                        @if($match->status === 'finished')
+                                        @if($match->status === 'finished' || $match->status === 'live')
                                             <div class="text-lg font-bold text-gray-900">
-                                                {{ $match->home_goals }} - {{ $match->away_goals }}
+                                                <span class="home-score">{{ $match->home_goals ?? 0 }}</span> - <span class="away-score">{{ $match->away_goals ?? 0 }}</span>
                                             </div>
                                         @else
                                             <div class="text-sm text-gray-500">vs</div>
@@ -109,13 +109,14 @@
                                     </div>
                                     
                                     <div class="flex-shrink-0">
-                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                        <span class="match-status px-2 inline-flex text-xs leading-5 font-semibold rounded-full
                                             @if($match->status === 'scheduled') bg-yellow-100 text-yellow-800
-                                            @elseif($match->status === 'live') bg-red-100 text-red-800
+                                            @elseif($match->status === 'live') bg-red-100 text-red-800 animate-pulse
                                             @elseif($match->status === 'finished') bg-green-100 text-green-800
                                             @else bg-gray-100 text-gray-800 @endif">
                                             @if($match->status === 'scheduled') Programado
-                                            @elseif($match->status === 'live') En Vivo
+                                            @elseif($match->status === 'live') 
+                                                @if($match->minute) {{ $match->minute }}' @else En Vivo @endif
                                             @elseif($match->status === 'finished') Finalizado
                                             @else {{ ucfirst($match->status) }} @endif
                                         </span>

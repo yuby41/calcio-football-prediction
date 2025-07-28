@@ -32,9 +32,9 @@ class Kernel extends ConsoleKernel
                  ->everyTwoHours()
                  ->withoutOverlapping();
 
-        // Update live scores every 30 minutes
+        // Update live scores every 5 minutes (faster for live matches)
         $schedule->command('football:update-today --silent')
-                 ->everyThirtyMinutes()
+                 ->everyFiveMinutes()
                  ->withoutOverlapping();
 
         // Generate predictions for new matches every hour

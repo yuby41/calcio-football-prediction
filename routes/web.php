@@ -19,3 +19,11 @@ Route::get('/statistics/chart-data', [StatisticsController::class, 'chartData'])
 Route::get('/statistics/league-data', [StatisticsController::class, 'leagueData'])->name('statistics.league-data');
 Route::get('/statistics/detail-data', [StatisticsController::class, 'detailData'])->name('statistics.detail-data');
 Route::get('/statistics/refresh', [StatisticsController::class, 'refresh'])->name('statistics.refresh');
+
+// API Routes for live updates
+Route::prefix('api')->group(function () {
+    Route::get('/live/matches', [App\Http\Controllers\Api\LiveUpdatesController::class, 'matches'])->name('api.live.matches');
+    Route::get('/live/statistics', [App\Http\Controllers\Api\LiveUpdatesController::class, 'statistics'])->name('api.live.statistics');
+    Route::get('/live/live-matches', [App\Http\Controllers\Api\LiveUpdatesController::class, 'liveMatches'])->name('api.live.live-matches');
+    Route::get('/health', [App\Http\Controllers\Api\LiveUpdatesController::class, 'health'])->name('api.health');
+});

@@ -4,6 +4,8 @@ namespace App\Observers;
 
 use App\Models\FootballMatch;
 use App\Services\StatisticsService;
+use App\Events\MatchScoreUpdated;
+use App\Events\StatisticsUpdated;
 use Illuminate\Support\Facades\Cache;
 
 class FootballMatchObserver
@@ -17,6 +19,11 @@ class FootballMatchObserver
         // This ensures fresh calculations when match status or scores change
         if ($this->shouldClearCache($footballMatch)) {
             Cache::forget('prediction_accuracy');
+            
+            // Broadcast live score updates
+            if ($footballMatch->wasChanged(['home_goals', 'away_goals', 'status', 'minute'])) {
+                event(new MatchScoreUpdated($footballMatch));
+            }
             
             // Update prediction accuracy if match is finished
             if ($footballMatch->status === 'finished' && 
@@ -83,6 +90,14 @@ class FootballMatchObserver
         // Using direct call to avoid mbstring dependency
         try {
             \Artisan::call('statistics:update-sql');
+            
+            // Broadcast statistics update event
+            $accuracy = \App\Services\SimpleAccuracyService::getCurrentAccuracy();
+            event(new StatisticsUpdated([
+                'accuracy' => $accuracy,
+                'total_predictions' => $prediction->where('is_correct', '!=', null)->count(),
+                'correct_predictions' => $prediction->where('is_correct', true)->count(),
+            ]));
         } catch (\Exception $e) {
             \Log::warning('Failed to update statistics automatically: ' . $e->getMessage());
         }

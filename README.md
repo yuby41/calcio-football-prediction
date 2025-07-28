@@ -5,11 +5,13 @@ A Laravel-based football betting application that uses Machine Learning to predi
 ## 🚀 Features
 
 - **ML-Powered Predictions**: XGBoost and Gradient Boosting models for accurate predictions
-- **Real-time Data**: Live match updates and scores via Football API
+- **Real-time Updates**: Live match scores with intelligent polling (10-30s intervals)
 - **Interactive Dashboard**: Modern UI with TailwindCSS and Chart.js
 - **Automated Statistics**: Real-time prediction accuracy tracking
 - **Multi-League Support**: Premier League, La Liga, Bundesliga, and more
 - **Performance Analytics**: Detailed accuracy metrics and trends
+- **Live Match Broadcasting**: Event-driven updates for live scores and statistics
+- **API Endpoints**: RESTful APIs for real-time data access
 
 ## 🛠️ Tech Stack
 
@@ -101,16 +103,24 @@ php artisan statistics:update-sql
 ## 📊 Web Interface
 
 - **Home** (/) - Dashboard with live matches and predictions
-- **Matches** (/matches) - All matches with filtering
+- **Matches** (/matches) - All matches with filtering and live updates
 - **Teams** (/teams) - Team statistics and profiles  
-- **Statistics** (/statistics) - Prediction accuracy analytics
+- **Statistics** (/statistics) - Prediction accuracy analytics with real-time updates
+
+## 🔗 API Endpoints
+
+- `GET /api/live/matches` - Live match updates with timestamps
+- `GET /api/live/statistics` - Real-time prediction accuracy
+- `GET /api/live/live-matches` - Currently live matches only
+- `GET /api/health` - System health check
 
 ## 🤖 Automated Tasks
 
 The application includes scheduled tasks for automation:
 
+- **Every 5 minutes**: Update live scores and match results
 - **Every 10 minutes**: Auto-finish completed matches
-- **Every 30 minutes**: Update prediction accuracy and live scores
+- **Every 30 minutes**: Update prediction accuracy
 - **Every hour**: Generate new predictions and update statistics
 - **Daily**: Generate team statistics and clean old logs
 
