@@ -294,11 +294,24 @@ class BudgetController extends Controller
 
     private function getBettingOpportunities(BudgetConfiguration $budget): array
     {
+        // Incluir tanto partidos programados como partidos EN VIVO
         $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
-            ->where('status', 'scheduled')
-            ->where('match_date', '>=', now())
-            ->where('match_date', '<=', now()->addDays(7))
+            ->whereIn('status', ['scheduled', 'live'])
+            ->where(function($query) {
+                // Partidos programados para los próximos 7 días
+                $query->where('status', 'scheduled')
+                      ->where('match_date', '>=', now())
+                      ->where('match_date', '<=', now()->addDays(7));
+            })
+            ->orWhere(function($query) {
+                // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
+                $query->where('status', 'live')
+                      ->where('match_date', '>=', now()->subDay())
+                      ->where('match_date', '<=', now()->addHours(3)); // Max 3h para partidos en vivo
+            })
             ->whereHas('prediction')
+            ->orderByRaw("CASE WHEN status = 'live' THEN 0 ELSE 1 END") // Priorizar partidos en vivo
+            ->orderBy('match_date')
             ->get();
 
         $opportunities = [];
@@ -321,6 +334,11 @@ class BudgetController extends Controller
                     
                     $odds = $this->bettingService->getRecommendedOdds($betType, $match);
                     
+                    // Ajustar odds para partidos en vivo (mayor volatilidad)
+                    if ($match->status === 'live') {
+                        $odds = $this->adjustLiveOdds($odds, $betType, $match);
+                    }
+
                     $opportunities[] = [
                         'match_id' => $match->id,
                         'match_name' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
@@ -331,17 +349,28 @@ class BudgetController extends Controller
                         'recommended_amount' => $recommendedAmount,
                         'odds' => $odds,
                         'potential_profit' => ($recommendedAmount * $odds) - $recommendedAmount,
+                        'is_live' => $match->status === 'live',
+                        'match_status' => $match->status,
+                        'live_indicator' => $match->status === 'live' ? '🔴 EN VIVO' : '',
+                        'urgency' => $match->status === 'live' ? 'ALTA' : $this->getMatchUrgency($match),
+                        'current_score' => $match->status === 'live' ? 
+                            "{$match->home_goals}-{$match->away_goals}" : null,
                     ];
                 }
             }
         }
 
-        // Ordenar por confianza descendente
+        // Ordenar por prioridad: 1) Partidos en vivo, 2) Confianza descendente
         usort($opportunities, function($a, $b) {
+            // Priorizar partidos en vivo
+            if ($a['is_live'] && !$b['is_live']) return -1;
+            if (!$a['is_live'] && $b['is_live']) return 1;
+            
+            // Si ambos tienen el mismo status, ordenar por confianza
             return $b['confidence'] <=> $a['confidence'];
         });
 
-        return array_slice($opportunities, 0, 20); // Top 20 oportunidades
+        return array_slice($opportunities, 0, 25); // Top 25 oportunidades (más para incluir live)
     }
 
     private function getConfidenceForBetType(FootballMatch $match, string $betType): float
@@ -360,6 +389,92 @@ class BudgetController extends Controller
 
         // Convertir de probabilidad (0-1) a porcentaje (0-100)
         return $probability * 100;
+    }
+
+    /**
+     * Ajusta las odds para partidos en vivo considerando la volatilidad
+     */
+    private function adjustLiveOdds(float $baseOdds, string $betType, FootballMatch $match): float
+    {
+        // Obtener tiempo transcurrido del partido (asumiendo 90 min total)
+        $timeElapsed = $this->getMatchTimeElapsed($match);
+        $volatilityFactor = $this->calculateLiveVolatility($betType, $timeElapsed, $match);
+        
+        // Ajustar odds según volatilidad
+        $adjustedOdds = $baseOdds * (1 + $volatilityFactor);
+        
+        // Aplicar límites realistas para partidos en vivo
+        return max(1.01, min(50.0, round($adjustedOdds, 2)));
+    }
+
+    /**
+     * Calcula la volatilidad de las odds en vivo
+     */
+    private function calculateLiveVolatility(string $betType, int $timeElapsed, FootballMatch $match): float 
+    {
+        $baseVolatility = 0;
+        
+        // Volatilidad base por tipo de apuesta en vivo
+        $volatilities = [
+            'home_win' => 0.15,      // 15% volatilidad base
+            'away_win' => 0.15,
+            'draw' => 0.20,          // Empate más volátil en vivo
+            'over_2_5' => 0.25,      // Goles muy volátiles en vivo
+            'under_2_5' => 0.25,
+            'both_teams_score' => 0.20,
+        ];
+        
+        $baseVolatility = $volatilities[$betType] ?? 0.15;
+        
+        // Ajustar por tiempo transcurrido (más tiempo = menos volatilidad)
+        $timeAdjustment = max(0.5, 1 - ($timeElapsed / 120)); // Reduce con el tiempo
+        
+        // Ajustar por marcador actual (partidos igualados = más volatilidad)
+        $scoreAdjustment = 1.0;
+        if ($match->home_goals !== null && $match->away_goals !== null) {
+            $goalDifference = abs($match->home_goals - $match->away_goals);
+            $scoreAdjustment = $goalDifference === 0 ? 1.3 : // Empate = +30% volatilidad
+                              ($goalDifference === 1 ? 1.1 : 0.9); // 1 gol diferencia = +10%, más = -10%
+        }
+        
+        return $baseVolatility * $timeAdjustment * $scoreAdjustment;
+    }
+
+    /**
+     * Obtiene el tiempo transcurrido del partido en minutos
+     */
+    private function getMatchTimeElapsed(FootballMatch $match): int
+    {
+        if ($match->status !== 'live') {
+            return 0;
+        }
+        
+        // Calcular tiempo transcurrido desde el inicio del partido
+        $now = now();
+        $matchStart = $match->match_date;
+        
+        $minutesElapsed = $matchStart->diffInMinutes($now);
+        
+        // Limitar a un rango realista (0-120 minutos incluyendo extra time)
+        return (int) min(120, max(0, $minutesElapsed));
+    }
+
+    /**
+     * Determina la urgencia de un partido basado en cuándo comienza
+     */
+    private function getMatchUrgency(FootballMatch $match): string
+    {
+        if ($match->status === 'live') {
+            return 'ALTA';
+        }
+        
+        $hoursUntilMatch = now()->diffInHours($match->match_date, false);
+        
+        if ($hoursUntilMatch <= 2) return 'ALTA';
+        if ($hoursUntilMatch <= 6) return 'MEDIA';
+        if ($hoursUntilMatch <= 24) return 'BAJA';
+        
+        return 'MUY BAJA';
     }
 
     public function edit(BudgetConfiguration $budget)
@@ -414,63 +529,15 @@ class BudgetController extends Controller
                 'bet_status' => $bet->status
             ]);
 
-            // Verificar que la apuesta pertenece al budget
-            if ($bet->budget_configuration_id !== $budget->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'La apuesta no pertenece a este budget.'
-                ], 403);
-            }
-
-            // Solo permitir eliminar apuestas pendientes
-            if ($bet->status !== 'pending') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Solo se pueden eliminar apuestas pendientes.'
-                ], 422);
-            }
-
-            $betAmount = $bet->amount;
-            $betType = $bet->bet_type;
-            $budgetId = $budget->id;
-            $betId = $bet->id;
-
-            // Usar SQL directo para evitar problemas con mbstring
-            \DB::transaction(function () use ($budgetId, $betAmount, $betId, $betType, $bet) {
-                // Obtener balance actual antes de la transacción
-                $currentBalance = \DB::table('budget_configurations')->where('id', $budgetId)->value('current_budget');
-                
-                // Restaurar al balance anterior (antes de hacer la apuesta)
-                $balanceBefore = $bet->budget_before; // Este es el balance que tenía antes de hacer la apuesta
-                
-                \DB::table('budget_configurations')
-                    ->where('id', $budgetId)
-                    ->update(['current_budget' => $balanceBefore]);
-
-                // Crear registro en historial
-                \DB::table('budget_history')->insert([
-                    'budget_configuration_id' => $budgetId,
-                    'type' => 'withdrawal',
-                    'amount' => $betAmount,
-                    'balance_before' => $currentBalance,
-                    'balance_after' => $balanceBefore,
-                    'bet_id' => $betId,
-                    'description' => "Apuesta cancelada: {$betType} - Restaurado balance anterior",
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-
-                // Eliminar la apuesta
-                \DB::table('bets')->where('id', $betId)->delete();
-            });
-
-            $newBalance = \DB::table('budget_configurations')->where('id', $budgetId)->value('current_budget');
+            $recalculationService = app(\App\Services\BudgetRecalculationService::class);
+            $result = $recalculationService->deleteBetWithRecalculation($budget, $bet);
 
             return response()->json([
-                'success' => true,
-                'message' => "Apuesta eliminada exitosamente. €{$betAmount} devueltos al budget.",
-                'refunded_amount' => $betAmount,
-                'new_balance' => $newBalance
+                'success' => $result['success'],
+                'message' => $result['message'],
+                'refunded_amount' => $result['deleted_bet']['amount'],
+                'new_balance' => $result['new_balance'],
+                'recalculation_details' => $result['recalculation_details']
             ]);
 
         } catch (\Exception $e) {
@@ -481,7 +548,98 @@ class BudgetController extends Controller
             
             return response()->json([
                 'success' => false,
-                'message' => 'Error interno: ' . $e->getMessage()
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Elimina múltiples apuestas de una vez
+     */
+    public function deleteMultipleBets(Request $request, BudgetConfiguration $budget): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'bet_ids' => 'required|array|min:1',
+                'bet_ids.*' => 'required|integer|exists:bets,id'
+            ]);
+
+            \Log::info('deleteMultipleBets request', [
+                'budget_id' => $budget->id,
+                'bet_ids' => $validated['bet_ids'],
+                'count' => count($validated['bet_ids'])
+            ]);
+
+            $recalculationService = app(\App\Services\BudgetRecalculationService::class);
+            $result = $recalculationService->deleteMultipleBetsWithRecalculation($budget, $validated['bet_ids']);
+
+            return response()->json([
+                'success' => $result['success'],
+                'message' => $result['message'],
+                'deleted_bets' => $result['deleted_bets'],
+                'total_refunded' => $result['total_refunded'],
+                'new_balance' => $result['new_balance'],
+                'recalculation_details' => $result['recalculation_details']
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error deleting multiple bets', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Verifica la integridad del presupuesto
+     */
+    public function checkIntegrity(BudgetConfiguration $budget): JsonResponse
+    {
+        try {
+            $recalculationService = app(\App\Services\BudgetRecalculationService::class);
+            $inconsistencies = $recalculationService->detectBudgetInconsistencies($budget);
+            $verification = $recalculationService->verifyBudgetIntegrity($budget);
+
+            return response()->json([
+                'success' => true,
+                'budget_name' => $budget->name,
+                'verification' => $verification,
+                'inconsistencies' => $inconsistencies
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Recalcula el historial del presupuesto
+     */
+    public function recalculateHistory(BudgetConfiguration $budget): JsonResponse
+    {
+        try {
+            $recalculationService = app(\App\Services\BudgetRecalculationService::class);
+            $result = $recalculationService->recalculateCompleteBudgetHistory($budget);
+
+            return response()->json([
+                'success' => $result['success'],
+                'message' => 'Historial de presupuesto recalculado exitosamente.',
+                'final_balance' => $result['final_balance'],
+                'details' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
             ], 500);
         }
     }

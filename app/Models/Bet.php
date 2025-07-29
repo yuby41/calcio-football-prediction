@@ -51,9 +51,9 @@ class Bet extends Model
         return $this->belongsTo(FootballMatch::class, 'match_id');
     }
 
-    public function budgetHistory(): BelongsTo
+    public function budgetHistory()
     {
-        return $this->belongsTo(BudgetHistory::class);
+        return $this->hasMany(BudgetHistory::class);
     }
 
     public function getBetTypeDisplayAttribute(): string

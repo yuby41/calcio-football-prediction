@@ -34,6 +34,9 @@ Route::prefix('budget')->name('budget.')->group(function () {
     Route::get('/{budget}/chart-data', [App\Http\Controllers\BudgetController::class, 'chartData'])->name('chart-data');
     Route::get('/{budget}/opportunities', [App\Http\Controllers\BudgetController::class, 'opportunities'])->name('opportunities');
     Route::delete('/{budget}/delete-bet/{bet}', [App\Http\Controllers\BudgetController::class, 'deleteBet'])->name('delete-bet');
+    Route::delete('/{budget}/delete-multiple-bets', [App\Http\Controllers\BudgetController::class, 'deleteMultipleBets'])->name('delete-multiple-bets');
+    Route::get('/{budget}/check-integrity', [App\Http\Controllers\BudgetController::class, 'checkIntegrity'])->name('check-integrity');
+    Route::post('/{budget}/recalculate-history', [App\Http\Controllers\BudgetController::class, 'recalculateHistory'])->name('recalculate-history');
 });
 
 // API Routes for live updates

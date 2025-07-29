@@ -22,12 +22,23 @@ class BettingRecommendationService
 
     public function getRecommendationsForBudget(BudgetConfiguration $budget): array
     {
-        // Obtener partidos próximos con predicciones
+        // Obtener partidos próximos Y en vivo con predicciones
         $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
-            ->where('status', 'scheduled')
-            ->where('match_date', '>=', now())
-            ->where('match_date', '<=', now()->addDays(7))
+            ->whereIn('status', ['scheduled', 'live'])
+            ->where(function($query) {
+                // Partidos programados para los próximos 7 días
+                $query->where('status', 'scheduled')
+                      ->where('match_date', '>=', now())
+                      ->where('match_date', '<=', now()->addDays(7));
+            })
+            ->orWhere(function($query) {
+                // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
+                $query->where('status', 'live')
+                      ->where('match_date', '>=', now()->subDay())
+                      ->where('match_date', '<=', now()->addHours(3));
+            })
             ->whereHas('prediction')
+            ->orderByRaw("CASE WHEN status = 'live' THEN 0 ELSE 1 END") // Priorizar partidos en vivo
             ->orderBy('match_date')
             ->get();
 
@@ -42,12 +53,19 @@ class BettingRecommendationService
                     'match' => $match,
                     'recommendations' => $matchRecommendations,
                     'match_analysis' => $this->getMatchAnalysis($match),
+                    'is_live' => $match->status === 'live',
+                    'live_info' => $match->status === 'live' ? $this->getLiveMatchInfo($match) : null,
                 ];
             }
         }
 
-        // Ordenar por mejor oportunidad
+        // Ordenar por mejor oportunidad: 1) Partidos en vivo, 2) Score
         usort($recommendations, function($a, $b) {
+            // Priorizar partidos en vivo
+            if ($a['is_live'] && !$b['is_live']) return -1;
+            if (!$a['is_live'] && $b['is_live']) return 1;
+            
+            // Si ambos tienen el mismo status, ordenar por oportunidad
             $scoreA = $this->getOpportunityScore($a['recommendations']);
             $scoreB = $this->getOpportunityScore($b['recommendations']);
             return $scoreB <=> $scoreA;
@@ -171,7 +189,12 @@ class BettingRecommendationService
             return null;
         }
 
-        // Calcular potential profit con odds reales
+        // Ajustar odds para partidos en vivo
+        if ($match->status === 'live') {
+            $realOdds = $this->adjustOddsForLiveMatch($realOdds, $betType, $match);
+        }
+
+        // Calcular potential profit con odds reales (posiblemente ajustadas)
         $potentialProfit = ($recommendedAmount * $realOdds) - $recommendedAmount;
 
         // Determinar nivel de recomendación basado en value y confianza
@@ -194,6 +217,9 @@ class BettingRecommendationService
             'rationale' => $this->getRationaleWithValue($betType, $confidence, $valueRating, $match),
             'value_rating' => round($valueRating, 1),
             'odds_source' => $oddsSource, // Fuente real de las odds (bet365_real, pinnacle_real, etc.)
+            'is_live' => $match->status === 'live',
+            'live_indicator' => $match->status === 'live' ? '🔴 EN VIVO' : '',
+            'urgency' => $match->status === 'live' ? 'ALTA' : $this->getMatchUrgency($match),
         ];
     }
 
@@ -492,5 +518,150 @@ class BettingRecommendationService
         }
 
         return $baseRationale;
+    }
+
+    /**
+     * Obtiene información específica de partidos en vivo
+     */
+    private function getLiveMatchInfo(FootballMatch $match): array
+    {
+        $timeElapsed = $this->getMatchTimeElapsed($match);
+        
+        return [
+            'current_score' => "{$match->home_goals}-{$match->away_goals}",
+            'time_elapsed' => $timeElapsed,
+            'time_display' => $this->formatMatchTime($timeElapsed),
+            'live_status' => '🔴 EN VIVO',
+            'volatility' => $this->calculateMatchVolatility($match, $timeElapsed),
+            'betting_window' => $timeElapsed < 75 ? 'ABIERTO' : 'CERRANDO PRONTO',
+        ];
+    }
+
+    /**
+     * Ajusta las odds para partidos en vivo
+     */
+    private function adjustOddsForLiveMatch(float $baseOdds, string $betType, FootballMatch $match): float
+    {
+        $timeElapsed = $this->getMatchTimeElapsed($match);
+        $volatilityFactor = $this->calculateLiveVolatilityForBetting($betType, $timeElapsed, $match);
+        
+        // Aplicar factor de volatilidad
+        $adjustedOdds = $baseOdds * (1 + $volatilityFactor);
+        
+        // Aplicar límites realistas
+        return max(1.01, min(25.0, round($adjustedOdds, 2)));
+    }
+
+    /**
+     * Calcula la volatilidad específica para apuestas en vivo
+     */
+    private function calculateLiveVolatilityForBetting(string $betType, int $timeElapsed, FootballMatch $match): float
+    {
+        $baseVolatility = [
+            'home_win' => 0.20,      // 20% más volatilidad en vivo
+            'away_win' => 0.20,
+            'draw' => 0.30,          // Empate muy volátil en vivo
+            'over_2_5' => 0.35,      // Goles extremadamente volátiles
+            'under_2_5' => 0.35,
+            'both_teams_score' => 0.25,
+        ][$betType] ?? 0.20;
+
+        // Ajustar por tiempo (menos tiempo restante = más volatilidad)
+        $timeAdjustment = 1 + (max(0, 90 - $timeElapsed) / 90 * 0.5);
+        
+        // Ajustar por marcador
+        $scoreAdjustment = 1.0;
+        if ($match->home_goals !== null && $match->away_goals !== null) {
+            $goalDifference = abs($match->home_goals - $match->away_goals);
+            $totalGoals = $match->home_goals + $match->away_goals;
+            
+            // Partidos igualados = más volatilidad
+            if ($goalDifference === 0) {
+                $scoreAdjustment = 1.4;
+            } elseif ($goalDifference === 1) {
+                $scoreAdjustment = 1.2;
+            }
+            
+            // Muchos goles = volatilidad para mercados de goles
+            if (str_contains($betType, '2_5') && $totalGoals >= 2) {
+                $scoreAdjustment *= 1.3;
+            }
+        }
+
+        return $baseVolatility * $timeAdjustment * $scoreAdjustment;
+    }
+
+    /**
+     * Obtiene el tiempo transcurrido del partido
+     */
+    private function getMatchTimeElapsed(FootballMatch $match): int
+    {
+        if ($match->status !== 'live') {
+            return 0;
+        }
+
+        $minutesElapsed = now()->diffInMinutes($match->match_date, false);
+        return min(120, max(0, $minutesElapsed));
+    }
+
+    /**
+     * Formatea el tiempo del partido para mostrar
+     */
+    private function formatMatchTime(int $minutes): string
+    {
+        if ($minutes <= 45) {
+            return "{$minutes}'";
+        } elseif ($minutes <= 90) {
+            return "{$minutes}' (2T)";
+        } else {
+            $extraTime = $minutes - 90;
+            return "90'+{$extraTime}'";
+        }
+    }
+
+    /**
+     * Calcula la volatilidad general del partido
+     */
+    private function calculateMatchVolatility(FootballMatch $match, int $timeElapsed): string
+    {
+        $volatilityScore = 0;
+        
+        // Factor tiempo
+        if ($timeElapsed < 30) $volatilityScore += 2; // Inicio de partido
+        elseif ($timeElapsed > 75) $volatilityScore += 3; // Final de partido
+        else $volatilityScore += 1;
+        
+        // Factor marcador
+        if ($match->home_goals !== null && $match->away_goals !== null) {
+            $goalDiff = abs($match->home_goals - $match->away_goals);
+            if ($goalDiff === 0) $volatilityScore += 3; // Empate
+            elseif ($goalDiff === 1) $volatilityScore += 2; // Diferencia mínima
+        }
+        
+        return match(true) {
+            $volatilityScore >= 5 => 'MUY ALTA',
+            $volatilityScore >= 3 => 'ALTA',
+            $volatilityScore >= 2 => 'MEDIA',
+            default => 'BAJA'
+        };
+    }
+
+    /**
+     * Determina la urgencia de un partido
+     */
+    private function getMatchUrgency(FootballMatch $match): string
+    {
+        if ($match->status === 'live') {
+            return 'ALTA';
+        }
+        
+        $hoursUntilMatch = now()->diffInHours($match->match_date, false);
+        
+        return match(true) {
+            $hoursUntilMatch <= 2 => 'ALTA',
+            $hoursUntilMatch <= 6 => 'MEDIA',
+            $hoursUntilMatch <= 24 => 'BAJA',
+            default => 'MUY BAJA'
+        };
     }
 }
