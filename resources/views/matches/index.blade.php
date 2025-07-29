@@ -104,7 +104,7 @@
                                             {{ $match->match_date->format('d/m/Y') }}
                                         </div>
                                         <div class="text-sm text-gray-500">
-                                            {{ $match->match_date->format('H:i') }}
+                                            {{ $match->match_date->format('H:i T') }}
                                         </div>
                                     </div>
                                     
@@ -202,4 +202,155 @@
         </div>
     @endif
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let updateInterval;
+    let isUpdating = false;
+    
+    // Get current filters
+    function getCurrentFilters() {
+        const urlParams = new URLSearchParams(window.location.search);
+        return {
+            status: urlParams.get('status') || 'all',
+            date_from: urlParams.get('date_from') || '',
+            date_to: urlParams.get('date_to') || '',
+            team: urlParams.get('team') || ''
+        };
+    }
+    
+    // Auto-update filtered matches
+    function updateFilteredMatches() {
+        if (isUpdating) return;
+        isUpdating = true;
+        
+        const filters = getCurrentFilters();
+        const queryString = new URLSearchParams(filters).toString();
+        
+        fetch(`/api/matches/filtered?${queryString}`)
+            .then(response => response.json())
+            .then(data => {
+                updateMatchesList(data.matches);
+                console.log('Matches updated at', new Date().toLocaleTimeString());
+            })
+            .catch(error => {
+                console.error('Error updating matches:', error);
+            })
+            .finally(() => {
+                isUpdating = false;
+            });
+    }
+    
+    function updateMatchesList(matches) {
+        const matchesList = document.querySelector('ul.divide-y.divide-gray-200');
+        if (!matchesList) return;
+        
+        matches.forEach(match => {
+            const existingMatch = document.querySelector(`[data-match-id="${match.id}"]`);
+            if (existingMatch) {
+                updateExistingMatch(existingMatch, match);
+            }
+        });
+    }
+    
+    function updateExistingMatch(element, match) {
+        // Update status
+        const statusElement = element.querySelector('.match-status');
+        if (statusElement) {
+            updateMatchStatus(statusElement, match);
+        }
+        
+        // Update scores for live/finished matches
+        if (match.status === 'live' || match.status === 'finished') {
+            const homeScoreElement = element.querySelector('.home-score');
+            const awayScoreElement = element.querySelector('.away-score');
+            
+            if (homeScoreElement && match.home_goals !== null) {
+                homeScoreElement.textContent = match.home_goals;
+            }
+            if (awayScoreElement && match.away_goals !== null) {
+                awayScoreElement.textContent = match.away_goals;
+            }
+        }
+        
+        // Update match status data attribute
+        element.setAttribute('data-status', match.status);
+    }
+    
+    function updateMatchStatus(statusElement, match) {
+        // Remove all status classes
+        statusElement.classList.remove(
+            'bg-yellow-100', 'text-yellow-800',
+            'bg-red-100', 'text-red-800', 'animate-pulse',
+            'bg-green-100', 'text-green-800',
+            'bg-gray-100', 'text-gray-800'
+        );
+        
+        // Add appropriate status classes and text
+        let statusText = '';
+        switch(match.status) {
+            case 'scheduled':
+                statusElement.classList.add('bg-yellow-100', 'text-yellow-800');
+                statusText = 'Programado';
+                break;
+            case 'live':
+                statusElement.classList.add('bg-red-100', 'text-red-800', 'animate-pulse');
+                statusText = match.minute ? match.minute + "'" : 'En Vivo';
+                break;
+            case 'finished':
+                statusElement.classList.add('bg-green-100', 'text-green-800');
+                statusText = 'Finalizado';
+                break;
+            default:
+                statusElement.classList.add('bg-gray-100', 'text-gray-800');
+                statusText = match.status.charAt(0).toUpperCase() + match.status.slice(1);
+        }
+        
+        statusElement.textContent = statusText;
+    }
+    
+    // Start auto-update
+    function startAutoUpdate() {
+        // Update immediately
+        updateFilteredMatches();
+        
+        // Then update every 45 seconds (less frequent than dashboard)
+        updateInterval = setInterval(updateFilteredMatches, 45000);
+    }
+    
+    // Stop auto-update
+    function stopAutoUpdate() {
+        if (updateInterval) {
+            clearInterval(updateInterval);
+            updateInterval = null;
+        }
+    }
+    
+    // Only start auto-update if we have matches displayed
+    const matchesList = document.querySelector('ul.divide-y.divide-gray-200');
+    if (matchesList) {
+        startAutoUpdate();
+    }
+    
+    // Handle form submission to restart auto-update with new filters
+    const filterForm = document.querySelector('form[method="GET"]');
+    if (filterForm) {
+        filterForm.addEventListener('submit', function() {
+            stopAutoUpdate();
+        });
+    }
+    
+    // Stop updating when leaving the page
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            stopAutoUpdate();
+        } else if (matchesList) {
+            startAutoUpdate();
+        }
+    });
+    
+    // Stop updating when navigating away
+    window.addEventListener('beforeunload', stopAutoUpdate);
+});
+</script>
 @endsection

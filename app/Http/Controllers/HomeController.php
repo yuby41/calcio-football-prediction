@@ -63,4 +63,65 @@ class HomeController extends Controller
         }
     }
 
+    public function getLiveData()
+    {
+        // Update match statuses based on time before retrieving data
+        $this->updateMatchStatuses();
+
+        // Get live matches
+        $liveMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+            ->where('status', 'live')
+            ->orderBy('match_date')
+            ->get();
+
+        // Get today's scheduled matches
+        $todayMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+            ->whereDate('match_date', Carbon::today())
+            ->where('status', 'scheduled')
+            ->orderBy('match_date')
+            ->get();
+
+        // Get upcoming matches (next 7 days, excluding today)
+        $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+            ->where('status', 'scheduled')
+            ->whereBetween('match_date', [
+                Carbon::tomorrow(),
+                Carbon::now()->addDays(7)
+            ])
+            ->orderBy('match_date')
+            ->take(25)
+            ->get();
+
+        // Calculate current accuracy
+        $accuracy = SimpleAccuracyService::getCurrentAccuracy();
+
+        return response()->json([
+            'liveMatches' => $liveMatches,
+            'todayMatches' => $todayMatches,
+            'upcomingMatches' => $upcomingMatches,
+            'accuracy' => $accuracy,
+            'counters' => [
+                'live' => $liveMatches->count(),
+                'today' => $todayMatches->count(),
+                'upcoming' => $upcomingMatches->count()
+            ]
+        ]);
+    }
+
+    private function updateMatchStatuses()
+    {
+        $now = Carbon::now();
+
+        // Update scheduled matches to live if they started (within last 2 hours)
+        FootballMatch::where('status', 'scheduled')
+            ->where('match_date', '<=', $now)
+            ->where('match_date', '>=', $now->copy()->subHours(2))
+            ->update(['status' => 'live']);
+
+        // Update live matches to finished if they ended (2 hours after start time)
+        FootballMatch::where('status', 'live')
+            ->where('match_date', '<=', $now->copy()->subHours(2))
+            ->update(['status' => 'finished']);
+    }
+
 }

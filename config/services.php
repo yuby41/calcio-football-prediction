@@ -36,8 +36,9 @@ return [
     ],
 
     'football_api' => [
-        'base_url' => env('FOOTBALL_API_BASE_URL', 'https://api.football-data.org/v4'),
+        'base_url' => env('FOOTBALL_API_BASE_URL', 'https://v3.football.api-sports.io'),
         'key' => env('FOOTBALL_API_KEY'),
+        'timezone' => env('APP_TIMEZONE', 'Europe/Madrid'), // Zona horaria para convertir horarios
     ],
 
 ];

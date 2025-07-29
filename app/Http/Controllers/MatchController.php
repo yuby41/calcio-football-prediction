@@ -93,4 +93,57 @@ class MatchController extends Controller
             'awayTeamMatches'
         ));
     }
+
+    public function getFilteredMatches(Request $request)
+    {
+        // Update match statuses based on time before retrieving data
+        $this->updateMatchStatuses();
+
+        $query = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction']);
+
+        // Filter by status
+        if ($request->has('status') && $request->status !== 'all') {
+            $query->where('status', $request->status);
+        }
+
+        // Filter by date range
+        if ($request->has('date_from') && $request->date_from) {
+            $query->whereDate('match_date', '>=', $request->date_from);
+        }
+
+        if ($request->has('date_to') && $request->date_to) {
+            $query->whereDate('match_date', '<=', $request->date_to);
+        }
+
+        // Filter by team
+        if ($request->has('team') && $request->team) {
+            $query->where(function ($q) use ($request) {
+                $q->where('home_team_id', $request->team)
+                  ->orWhere('away_team_id', $request->team);
+            });
+        }
+
+        $matches = $query->orderBy('match_date', 'desc')->take(100)->get();
+
+        return response()->json([
+            'matches' => $matches,
+            'total' => $matches->count()
+        ]);
+    }
+
+    private function updateMatchStatuses()
+    {
+        $now = Carbon::now();
+
+        // Update scheduled matches to live if they started (within last 2 hours)
+        FootballMatch::where('status', 'scheduled')
+            ->where('match_date', '<=', $now)
+            ->where('match_date', '>=', $now->copy()->subHours(2))
+            ->update(['status' => 'live']);
+
+        // Update live matches to finished if they ended (2 hours after start time)
+        FootballMatch::where('status', 'live')
+            ->where('match_date', '<=', $now->copy()->subHours(2))
+            ->update(['status' => 'finished']);
+    }
 }

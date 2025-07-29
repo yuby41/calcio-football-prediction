@@ -24,15 +24,23 @@
                 <p class="mt-2 text-gray-600">Predicciones generadas con Machine Learning para partidos de fútbol</p>
             </div>
             <div class="flex-shrink-0">
-                <form action="{{ route('home.manual-update') }}" method="POST" class="inline">
-                    @csrf
-                    <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200 shadow-sm">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                        Actualizar Ahora
-                    </button>
-                </form>
+                <div class="flex items-center space-x-3">
+                    <div id="auto-update-indicator" class="hidden">
+                        <div class="flex items-center text-sm text-green-600">
+                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600 mr-2"></div>
+                            Actualizando...
+                        </div>
+                    </div>
+                    <form action="{{ route('home.manual-update') }}" method="POST" class="inline">
+                        @csrf
+                        <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200 shadow-sm">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            Actualizar Ahora
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
@@ -146,7 +154,7 @@
                                         @if($match->home_goals !== null && $match->away_goals !== null)
                                             {{ $match->home_goals }} - {{ $match->away_goals }}
                                         @else
-                                            {{ $match->match_date->format('H:i') }}
+                                            {{ $match->match_date->format('H:i T') }}
                                         @endif
                                     </div>
                                 </div>
@@ -312,5 +320,141 @@
     </div>
     @endif
 
+
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let updateInterval;
+    let isUpdating = false;
+
+    // Auto-update function
+    function updateLiveData() {
+        if (isUpdating) return;
+        isUpdating = true;
+
+        // Show update indicator
+        const indicator = document.getElementById('auto-update-indicator');
+        if (indicator) {
+            indicator.classList.remove('hidden');
+        }
+
+        fetch('/api/live-data')
+            .then(response => response.json())
+            .then(data => {
+                // Add accuracy to counters object
+                const counters = {
+                    ...data.counters,
+                    accuracy: data.accuracy
+                };
+                
+                // Update counters
+                updateCounters(counters);
+                
+                // Update matches sections
+                updateLiveMatches(data.liveMatches);
+                updateTodayMatches(data.todayMatches);
+                updateUpcomingMatches(data.upcomingMatches);
+                
+                console.log('Live data updated at', new Date().toLocaleTimeString());
+            })
+            .catch(error => {
+                console.error('Error updating live data:', error);
+            })
+            .finally(() => {
+                // Hide update indicator
+                if (indicator) {
+                    setTimeout(() => {
+                        indicator.classList.add('hidden');
+                    }, 1000);
+                }
+                isUpdating = false;
+            });
+    }
+
+    function updateCounters(counters) {
+        // Get all counter elements more specifically
+        const counterElements = document.querySelectorAll('.text-lg.font-medium.text-gray-900');
+        
+        // Update accuracy (first element)
+        if (counterElements[0]) {
+            counterElements[0].textContent = counters.accuracy + '%';
+        }
+        
+        // Update live matches counter (second element)
+        if (counterElements[1] && counterElements[1].textContent !== counters.live.toString()) {
+            counterElements[1].textContent = counters.live;
+            // Add visual feedback for updates
+            counterElements[1].classList.add('animate-pulse');
+            setTimeout(() => counterElements[1].classList.remove('animate-pulse'), 1000);
+        }
+        
+        // Update today matches counter (third element)
+        if (counterElements[2] && counterElements[2].textContent !== counters.today.toString()) {
+            counterElements[2].textContent = counters.today;
+            counterElements[2].classList.add('animate-pulse');
+            setTimeout(() => counterElements[2].classList.remove('animate-pulse'), 1000);
+        }
+        
+        // Update upcoming matches counter (fourth element)
+        if (counterElements[3] && counterElements[3].textContent !== counters.upcoming.toString()) {
+            counterElements[3].textContent = counters.upcoming;
+            counterElements[3].classList.add('animate-pulse');
+            setTimeout(() => counterElements[3].classList.remove('animate-pulse'), 1000);
+        }
+    }
+
+    function updateAccuracy(accuracy) {
+        // This is now handled in updateCounters
+    }
+
+    function updateLiveMatches(matches) {
+        const liveSection = document.querySelector('h2:contains("🔴 En Vivo")');
+        // Implementation for updating live matches section
+        // This would require more complex DOM manipulation
+    }
+
+    function updateTodayMatches(matches) {
+        // Implementation for updating today's matches
+        // This would require more complex DOM manipulation
+    }
+
+    function updateUpcomingMatches(matches) {
+        // Implementation for updating upcoming matches
+        // This would require more complex DOM manipulation
+    }
+
+    // Start auto-update when page loads
+    function startAutoUpdate() {
+        // Update immediately
+        updateLiveData();
+        
+        // Then update every 30 seconds
+        updateInterval = setInterval(updateLiveData, 30000);
+    }
+
+    // Stop auto-update
+    function stopAutoUpdate() {
+        if (updateInterval) {
+            clearInterval(updateInterval);
+            updateInterval = null;
+        }
+    }
+
+    // Start auto-update
+    startAutoUpdate();
+
+    // Stop updating when leaving the page
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            stopAutoUpdate();
+        } else {
+            startAutoUpdate();
+        }
+    });
+
+    // Stop updating when navigating away
+    window.addEventListener('beforeunload', stopAutoUpdate);
+});
+</script>
 @endsection

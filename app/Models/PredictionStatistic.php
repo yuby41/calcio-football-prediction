@@ -29,8 +29,12 @@ class PredictionStatistic extends Model
 
     const PREDICTION_TYPES = [
         'match_outcome' => 'Resultado del Partido',
-        'both_teams_score' => 'Ambos Equipos Anotan',
-        'over_under_2_5' => 'Over/Under 2.5 Goles',
+        'both_teams_score_yes' => 'Gol',
+        'both_teams_score_no' => 'No Gol',
+        'over_2_5' => 'Over 2.5 Goles',
+        'under_2_5' => 'Under 2.5 Goles',
+        'first_half_over_0_5' => 'Over 0.5 Goles (1T)',
+        'first_half_over_1_5' => 'Over 1.5 Goles (1T)',
     ];
 
     public function getDisplayNameAttribute(): string

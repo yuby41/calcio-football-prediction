@@ -137,10 +137,25 @@ curl http://localhost:8000/budget
 
 ## 🔗 API Endpoints
 
+### Live Data
 - `GET /api/live/matches` - Live match updates with timestamps
 - `GET /api/live/statistics` - Real-time prediction accuracy
 - `GET /api/live/live-matches` - Currently live matches only
 - `GET /api/health` - System health check
+
+### Budget Management
+- `GET /budget` - Budget management dashboard
+- `POST /budget` - Create new budget configuration
+- `GET /budget/{id}` - View specific budget details
+- `GET /budget/{id}/chart-data` - Budget evolution data for charts
+- `GET /budget/{id}/opportunities` - Available betting opportunities
+- `POST /budget/{id}/bet` - Place bet using budget strategy
+- `POST /budget/{id}/resolve` - Resolve pending bets
+
+### Statistics & Analytics
+- `GET /statistics` - Prediction accuracy dashboard with interactive charts
+- `GET /api/statistics/monthly` - Monthly accuracy trends
+- `GET /api/statistics/leagues` - Performance by league
 
 ## 🤖 Automated Tasks
 

@@ -10,6 +10,8 @@ class BudgetHistory extends Model
 {
     use HasFactory;
 
+    protected $table = 'budget_history';
+
     protected $fillable = [
         'budget_configuration_id',
         'bet_id',

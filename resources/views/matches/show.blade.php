@@ -34,7 +34,7 @@
                     @endif
                     
                     <div class="text-sm text-gray-600">
-                        {{ $match->match_date->format('d/m/Y H:i') }}
+                        {{ $match->match_date->format('d/m/Y H:i T') }}
                     </div>
                     
                     <span class="mt-2 px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full

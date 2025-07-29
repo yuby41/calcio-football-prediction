@@ -3,15 +3,14 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\MatchController;
-use App\Http\Controllers\TeamController;
 use App\Http\Controllers\StatisticsController;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::post('/manual-update', [HomeController::class, 'manualUpdate'])->name('home.manual-update');
+Route::get('/api/live-data', [HomeController::class, 'getLiveData'])->name('api.live-data');
 Route::get('/matches', [MatchController::class, 'index'])->name('matches.index');
 Route::get('/matches/{footballMatch}', [MatchController::class, 'show'])->name('matches.show');
-Route::get('/teams', [TeamController::class, 'index'])->name('teams.index');
-Route::get('/teams/{team}', [TeamController::class, 'show'])->name('teams.show');
+Route::get('/api/matches/filtered', [MatchController::class, 'getFilteredMatches'])->name('api.matches.filtered');
 
 // Statistics routes
 Route::get('/statistics', [StatisticsController::class, 'index'])->name('statistics.index');
@@ -26,10 +25,15 @@ Route::prefix('budget')->name('budget.')->group(function () {
     Route::get('/create', [App\Http\Controllers\BudgetController::class, 'create'])->name('create');
     Route::post('/', [App\Http\Controllers\BudgetController::class, 'store'])->name('store');
     Route::get('/{budget}', [App\Http\Controllers\BudgetController::class, 'show'])->name('show');
+    Route::get('/{budget}/edit', [App\Http\Controllers\BudgetController::class, 'edit'])->name('edit');
+    Route::put('/{budget}', [App\Http\Controllers\BudgetController::class, 'update'])->name('update');
+    Route::delete('/{budget}', [App\Http\Controllers\BudgetController::class, 'destroy'])->name('destroy');
+    Route::get('/{budget}/recommendations', [App\Http\Controllers\BudgetController::class, 'recommendations'])->name('recommendations');
     Route::post('/{budget}/bet', [App\Http\Controllers\BudgetController::class, 'placeBet'])->name('place-bet');
     Route::post('/{budget}/resolve', [App\Http\Controllers\BudgetController::class, 'resolveBets'])->name('resolve-bets');
     Route::get('/{budget}/chart-data', [App\Http\Controllers\BudgetController::class, 'chartData'])->name('chart-data');
     Route::get('/{budget}/opportunities', [App\Http\Controllers\BudgetController::class, 'opportunities'])->name('opportunities');
+    Route::delete('/{budget}/delete-bet/{bet}', [App\Http\Controllers\BudgetController::class, 'deleteBet'])->name('delete-bet');
 });
 
 // API Routes for live updates

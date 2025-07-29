@@ -13,12 +13,14 @@ class FootballApiService
 {
     private string $baseUrl;
     private string $apiKey;
+    private string $timezone;
     private array $headers;
 
     public function __construct()
     {
         $this->baseUrl = config('services.football_api.base_url');
         $this->apiKey = config('services.football_api.key');
+        $this->timezone = config('services.football_api.timezone', 'Europe/Madrid');
         $this->headers = [
             'x-apisports-key' => $this->apiKey,
             'Accept' => 'application/json',
@@ -63,7 +65,8 @@ class FootballApiService
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/fixtures", [
                     'league' => $leagueId,
-                    'season' => $season
+                    'season' => $season,
+                    'timezone' => $this->timezone
                 ]);
 
             if ($response->successful()) {
@@ -88,7 +91,8 @@ class FootballApiService
         try {
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/fixtures", [
-                    'live' => 'all'
+                    'live' => 'all',
+                    'timezone' => $this->timezone
                 ]);
 
             if ($response->successful()) {
@@ -106,11 +110,13 @@ class FootballApiService
     public function fetchTodayMatches(): array
     {
         try {
-            $today = Carbon::today()->format('Y-m-d');
+            // Usar la zona horaria configurada para obtener la fecha local correcta
+            $today = Carbon::today($this->timezone)->format('Y-m-d');
             
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/fixtures", [
-                    'date' => $today
+                    'date' => $today,
+                    'timezone' => $this->timezone // Solicitar horarios en zona horaria local
                 ]);
 
             if ($response->successful()) {
@@ -137,7 +143,8 @@ class FootballApiService
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/fixtures", [
                     'team' => $teamId,
-                    'season' => $season
+                    'season' => $season,
+                    'timezone' => $this->timezone
                 ]);
 
             if ($response->successful()) {
@@ -182,7 +189,16 @@ class FootballApiService
             $goals = $matchData['goals'] ?? [];
             $league = $matchData['league'] ?? [];
             
-            $matchDate = Carbon::parse($fixture['date']);
+            // La API v3.football.api-sports.io devuelve fechas en UTC, convertimos a zona horaria local
+            $matchDate = Carbon::parse($fixture['date'])
+                ->utc() // Asegurar que se interprete como UTC
+                ->setTimezone($this->timezone); // Convertir a zona horaria local
+            
+            // Si la hora es 00:00, verificar si tenemos mejor información de timestamp
+            if ($matchDate->format('H:i') === '00:00' && isset($fixture['timestamp'])) {
+                $matchDate = Carbon::createFromTimestamp($fixture['timestamp'])
+                    ->setTimezone($this->timezone);
+            }
             
             $processedMatches[] = [
                 'external_id' => (string) $fixture['id'],
