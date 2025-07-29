@@ -78,6 +78,34 @@ php artisan test
 ```
 
 ### Football Data Management
+
+#### Enhanced API Sync Commands (v3.football.api-sports.io)
+```bash
+# 🚀 OPTIMIZED COMMANDS - Use these for production
+
+# Daily sync - Today's matches (every 15-30 minutes)
+php artisan football:sync-fixtures-optimized --type=today
+
+# Live updates - Real-time scores (every 15 seconds during matches)
+php artisan football:sync-fixtures-optimized --type=live
+
+# Weekly sync - Past and upcoming matches (every 6 hours)
+php artisan football:sync-fixtures-optimized --type=week --leagues=PL,PD,BL1
+
+# Season sync - Full season data (daily or less)
+php artisan football:sync-fixtures-optimized --type=season --leagues=PL
+
+# League standings and team stats (every 6 hours)
+php artisan football:sync-standings --leagues=PL,PD,BL1 --with-stats
+
+# Teams and leagues sync (weekly or per season)
+php artisan football:sync-leagues-teams --leagues=PL,PD,BL1,SA,FL1 --season=2025
+
+# Additional options for detailed data
+php artisan football:sync-fixtures-optimized --type=today --with-events --with-stats
+```
+
+#### Legacy Commands (still supported)
 ```bash
 # Sync teams and matches from API (includes automatic predictions)
 php artisan football:sync PL --season=2024
