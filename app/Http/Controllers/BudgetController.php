@@ -298,9 +298,10 @@ class BudgetController extends Controller
 
     private function getBettingOpportunities(BudgetConfiguration $budget): array
     {
-        // Incluir tanto partidos programados como partidos EN VIVO
+        // Incluir tanto partidos programados como partidos EN VIVO (excluyendo partidos terminados)
         $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
             ->whereIn('status', ['scheduled', 'live'])
+            ->whereNotIn('status', ['finished', 'cancelled', 'postponed', 'suspended']) // Excluir partidos terminados/cancelados
             ->where(function($query) {
                 // Partidos programados para los próximos 7 días
                 $query->where('status', 'scheduled')
@@ -319,14 +320,45 @@ class BudgetController extends Controller
             ->get();
 
         $opportunities = [];
+        $filteredMatches = 0;
+        $filteredBets = 0;
 
         foreach ($upcomingMatches as $match) {
             if (!$match->prediction) continue;
+
+            // Verificar si el partido ya tiene resultados conocidos que invaliden apuestas
+            if ($this->hasKnownResults($match)) {
+                $filteredMatches++;
+                \Log::info('Partido filtrado por resultados conocidos', [
+                    'match' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
+                    'match_id' => $match->id,
+                    'status' => $match->status,
+                    'match_date' => $match->match_date,
+                    'home_goals' => $match->home_goals,
+                    'away_goals' => $match->away_goals,
+                    'reason' => 'Partido con resultados conocidos'
+                ]);
+                continue; // Saltar partidos con resultados ya conocidos
+            }
 
             $betTypes = ['home_win', 'away_win', 'draw', 'over_2_5', 'both_teams_score', 'over_0_5_first_half'];
             
             foreach ($betTypes as $betType) {
                 $confidence = $this->getConfidenceForBetType($match, $betType);
+                
+                // Verificar si esta apuesta específica aún es válida
+                if (!$this->isBetTypeStillValid($match, $betType)) {
+                    $filteredBets++;
+                    \Log::debug('Apuesta filtrada por resultado conocido', [
+                        'match' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
+                        'bet_type' => $betType,
+                        'status' => $match->status,
+                        'time_elapsed' => $match->status === 'live' ? $this->getMatchTimeElapsed($match) : null,
+                        'score' => $match->status === 'live' ? "{$match->home_goals}-{$match->away_goals}" : null,
+                        'reason' => 'Apuesta ya resuelta o no válida'
+                    ]);
+                    continue; // Saltar apuestas que ya no son válidas
+                }
                 
                 if ($confidence >= $budget->min_confidence) {
                     $recommendedAmount = $this->bettingService->calculateBetAmount(
@@ -482,6 +514,17 @@ class BudgetController extends Controller
             
             return $scoreB <=> $scoreA; // Ordenar de mayor a menor score
         });
+
+        // Log de resumen del filtrado
+        $totalValidRecommendations = array_sum(array_map(fn($match) => count($match['recommendations']), $groupedArray));
+        \Log::info('Resumen filtrado de recomendaciones IA', [
+            'total_matches_analyzed' => $upcomingMatches->count(),
+            'filtered_matches' => $filteredMatches,
+            'filtered_individual_bets' => $filteredBets,
+            'valid_matches_with_bets' => count($groupedArray),
+            'total_valid_recommendations' => $totalValidRecommendations,
+            'final_top_matches_returned' => min(15, count($groupedArray))
+        ]);
 
         return array_slice($groupedArray, 0, 15); // Top 15 partidos (cada partido puede tener múltiples recomendaciones)
     }
@@ -967,5 +1010,119 @@ class BudgetController extends Controller
             // Para odds altas, redondear a .0 o .5 
             return round($odds * 2) / 2;
         }
+    }
+
+    /**
+     * Verifica si el partido ya tiene resultados conocidos que invaliden apuestas
+     */
+    private function hasKnownResults(FootballMatch $match): bool
+    {
+        // Si el partido ya terminó, no debe aparecer en recomendaciones
+        if ($match->status === 'finished') {
+            return true;
+        }
+
+        // Si el partido fue cancelado o pospuesto
+        if (in_array($match->status, ['cancelled', 'postponed', 'suspended'])) {
+            return true;
+        }
+
+        // Para partidos en vivo, verificar si ya es muy tarde para apostar
+        if ($match->status === 'live') {
+            $timeElapsed = $this->getMatchTimeElapsed($match);
+            
+            // Si el partido está en tiempo de descuento o ya terminó prácticamente
+            if ($timeElapsed >= 90) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Verifica si un tipo de apuesta específico aún es válido para el partido
+     */
+    private function isBetTypeStillValid(FootballMatch $match, string $betType): bool
+    {
+        // Para partidos programados, todas las apuestas son válidas
+        if ($match->status === 'scheduled') {
+            return true;
+        }
+
+        // Para partidos en vivo, verificar según el tipo de apuesta
+        if ($match->status === 'live') {
+            $timeElapsed = $this->getMatchTimeElapsed($match);
+            $homeGoals = $match->home_goals;
+            $awayGoals = $match->away_goals;
+            
+            // Si no tenemos datos de goles actualizados, ser conservadores
+            if ($homeGoals === null || $awayGoals === null) {
+                // Sin datos de goles, solo permitir apuestas en los primeros 30 minutos
+                return $timeElapsed < 30;
+            }
+            
+            $totalGoals = $homeGoals + $awayGoals;
+
+            return match($betType) {
+                // Resultado del partido: válido hasta minuto 85
+                'home_win', 'away_win', 'draw' => $timeElapsed < 85,
+                
+                // Over 2.5: inválido si ya hay 3+ goles
+                'over_2_5' => $totalGoals < 3,
+                
+                // Under 2.5: inválido si ya hay 3+ goles
+                'under_2_5' => $totalGoals < 3,
+                
+                // Ambos marcan: inválido si ya marcaron ambos o es imposible
+                'both_teams_score' => $this->isBothTeamsScoreStillValid($homeGoals, $awayGoals, $timeElapsed),
+                
+                // Over 0.5 1T: inválido si ya terminó el primer tiempo o ya hay goles
+                'over_0_5_first_half' => $this->isOver05FirstHalfStillValid($homeGoals, $awayGoals, $timeElapsed),
+                
+                default => $timeElapsed < 80 // Otras apuestas válidas hasta minuto 80
+            };
+        }
+
+        return false;
+    }
+
+    /**
+     * Verifica si "Ambos Equipos Marcan" aún es válida
+     */
+    private function isBothTeamsScoreStillValid(int $homeGoals, int $awayGoals, int $timeElapsed): bool
+    {
+        // Si ambos ya marcaron, la apuesta ya se resolvió
+        if ($homeGoals > 0 && $awayGoals > 0) {
+            return false;
+        }
+
+        // Si es muy tarde en el partido y uno no ha marcado, muy improbable
+        if ($timeElapsed >= 85 && ($homeGoals === 0 || $awayGoals === 0)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Verifica si "Over 0.5 First Half" aún es válida
+     */
+    private function isOver05FirstHalfStillValid(int $homeGoals, int $awayGoals, int $timeElapsed): bool
+    {
+        // Si ya terminó el primer tiempo (45+ minutos)
+        if ($timeElapsed >= 45) {
+            return false;
+        }
+
+        // Si ya hay goles en el primer tiempo, la apuesta ya se resolvió
+        // Nota: Necesitaríamos datos específicos del primer tiempo para ser más precisos
+        // Por ahora asumimos que si hay goles y aún no llegamos al minuto 45, puede ser válida
+        if ($homeGoals + $awayGoals > 0 && $timeElapsed < 45) {
+            // Si ya hay goles y estamos en primer tiempo, la apuesta Over 0.5 1T ya ganó
+            return false;
+        }
+
+        return true;
     }
 }
