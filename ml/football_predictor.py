@@ -668,19 +668,19 @@ class FootballPredictor:
             conn.close()
         
         if len(stats_df) != 2:
-            # Use realistic default values if statistics not available
-            # These values simulate moderate team performance instead of zeros
+            # Use more realistic default values if statistics not available
+            # Based on moderate Premier League team performance
             stats_df = pd.DataFrame({
                 'team_id': [home_team_id, away_team_id],
-                'matches_played': [10, 10],
-                'wins': [4, 3],  # Different win rates for variety
-                'draws': [3, 4],
-                'losses': [3, 3],
-                'goals_for': [12, 10],  # Different attacking strengths
-                'goals_against': [10, 12],
-                'avg_goals_for': [1.2, 1.0],
-                'avg_goals_against': [1.0, 1.2],
-                'points': [15, 13]  # Different point totals
+                'matches_played': [20, 20],
+                'wins': [8, 7],  # 40% and 35% win rate (realistic)
+                'draws': [6, 6],  # 30% draw rate each
+                'losses': [6, 7],  # Remaining matches
+                'goals_for': [26, 24],  # 1.3 and 1.2 goals per game (realistic)
+                'goals_against': [24, 26],  # Similar defensive records
+                'avg_goals_for': [1.3, 1.2],
+                'avg_goals_against': [1.2, 1.3],
+                'points': [30, 27]  # Mid-table teams
             })
         
         home_stats = stats_df[stats_df['team_id'] == home_team_id].iloc[0] if len(stats_df[stats_df['team_id'] == home_team_id]) > 0 else stats_df.iloc[0]
@@ -851,7 +851,7 @@ class FootballPredictor:
 def main():
     """Main function for command line usage"""
     if len(sys.argv) < 2:
-        print("Usage: python football_predictor.py [train|predict] [args...]")
+        print("Usage: python football_predictor.py [train|predict|evaluate] [args...]")
         sys.exit(1)
     
     predictor = FootballPredictor()
@@ -910,6 +910,58 @@ def main():
         
         prediction = predictor.predict_match(home_team_id, away_team_id)
         print(json.dumps(prediction, indent=2))
+    
+    elif sys.argv[1] == 'evaluate':
+        print("Evaluating model performance on recent data...")
+        
+        if not predictor.load_models():
+            print("Models not found. Please train first.")
+            sys.exit(1)
+        
+        # Load recent data for evaluation
+        df = predictor.load_data()
+        if df.empty:
+            print("No data available for evaluation")
+            sys.exit(1)
+        
+        # Use last 30 days of finished matches for evaluation
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.now() - timedelta(days=30)
+        recent_df = df[df['match_date'] >= cutoff_date].copy()
+        
+        if len(recent_df) < 10:
+            print("Not enough recent data for evaluation")
+            sys.exit(1)
+        
+        print(f"Evaluating on {len(recent_df)} recent matches...")
+        
+        # Create features for evaluation
+        recent_df = predictor.create_features(recent_df)
+        X_eval, y_home_eval, y_away_eval, y_outcome_eval = predictor.prepare_training_data(recent_df)
+        
+        # Make predictions
+        home_goals_pred = predictor.goals_model.predict(X_eval)
+        away_goals_pred = predictor.goals_model.predict(X_eval)
+        outcome_pred = predictor.outcome_model.predict(X_eval)
+        
+        # Calculate accuracies
+        from sklearn.metrics import mean_absolute_error, accuracy_score
+        
+        home_mae = mean_absolute_error(y_home_eval, home_goals_pred)
+        away_mae = mean_absolute_error(y_away_eval, away_goals_pred)
+        outcome_accuracy = accuracy_score(y_outcome_eval, outcome_pred)
+        
+        # Output results in JSON format for Laravel to parse
+        results = {
+            "evaluation_date": datetime.now().isoformat(),
+            "matches_evaluated": len(recent_df),
+            "home_goals_mae": float(home_mae),
+            "away_goals_mae": float(away_mae),
+            "accuracy": float(outcome_accuracy),
+            "combined_goals_mae": float((home_mae + away_mae) / 2)
+        }
+        
+        print(json.dumps(results, indent=2))
 
 if __name__ == '__main__':
     main()

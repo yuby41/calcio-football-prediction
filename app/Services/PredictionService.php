@@ -171,35 +171,55 @@ class PredictionService
     
     private function createFallbackPrediction(FootballMatch $match): array
     {
-        // Get team statistics (current season first, then previous seasons)
-        $currentSeason = date('Y');
-        $homeStats = $match->homeTeam->statistics()->where('season', $currentSeason)->first();
-        $awayStats = $match->awayTeam->statistics()->where('season', $currentSeason)->first();
+        // Get team statistics - prioritize historical data for better predictions
+        // Since current season (2025) has limited data, use 2023-2024 seasons primarily
+        $homeStats = $match->homeTeam->statistics()->where('season', '2023')->first();
+        $awayStats = $match->awayTeam->statistics()->where('season', '2023')->first();
         
-        // If no current season stats, try previous season
+        // Fallback to 2024 if 2023 not available
         if (!$homeStats) {
-            $homeStats = $match->homeTeam->statistics()->where('season', $currentSeason - 1)->first();
+            $homeStats = $match->homeTeam->statistics()->where('season', '2024')->first();
         }
         if (!$awayStats) {
-            $awayStats = $match->awayTeam->statistics()->where('season', $currentSeason - 1)->first();
+            $awayStats = $match->awayTeam->statistics()->where('season', '2024')->first();
+        }
+        
+        // Last resort: current season (but this will have very limited data)
+        if (!$homeStats) {
+            $homeStats = $match->homeTeam->statistics()->where('season', date('Y'))->first();
+        }
+        if (!$awayStats) {
+            $awayStats = $match->awayTeam->statistics()->where('season', date('Y'))->first();
         }
         
         // Calculate team strength indicators
         $homeStrength = $this->calculateTeamStrength($homeStats, $match->homeTeam);
         $awayStrength = $this->calculateTeamStrength($awayStats, $match->awayTeam);
         
-        // Home advantage factor (varies by team quality)
-        $homeAdvantage = 0.15 - (abs($homeStrength - $awayStrength) * 0.05);
-        $homeAdvantage = max(0.05, min(0.25, $homeAdvantage));
         
-        // Calculate base probabilities using ELO-like system
+        // Home advantage factor (adaptive based on team quality difference)
+        $qualityDiff = abs($homeStrength - $awayStrength);
+        // Reduce home advantage when away team is significantly stronger
+        $homeAdvantage = $awayStrength > $homeStrength ? 
+            max(0.03, 0.08 - ($qualityDiff * 0.15)) : // Reduce if away team stronger
+            0.08; // Normal home advantage
+        
+        // Calculate strength difference with home advantage
         $strengthDiff = ($homeStrength + $homeAdvantage) - $awayStrength;
-        $homeWinProb = 1 / (1 + pow(10, -$strengthDiff * 4));
-        $awayWinProb = 1 / (1 + pow(10, $strengthDiff * 4));
         
-        // Draw probability (higher for closer matches)
-        $competitiveness = 1 - abs($strengthDiff);
-        $drawProb = 0.15 + ($competitiveness * 0.20);
+        // More balanced probability calculation (much less extreme results)
+        // Using a very gentle logistic function for realistic football predictions
+        $homeWinProb = 1 / (1 + exp(-$strengthDiff * 3.5)); // Much gentler curve
+        $awayWinProb = 1 / (1 + exp($strengthDiff * 3.5));
+        
+        // Draw probability increases for closer matches and is more prominent
+        $competitiveness = max(0, 1 - abs($strengthDiff) * 2); // Penalize large differences
+        $drawProb = 0.20 + ($competitiveness * 0.18); // Base 20% + up to 18% more for close matches
+        
+        // Ensure minimum probabilities for realism
+        $homeWinProb = max(0.05, $homeWinProb); // Minimum 5%
+        $awayWinProb = max(0.05, $awayWinProb); // Minimum 5%  
+        $drawProb = max(0.15, $drawProb); // Minimum 15%
         
         // Normalize probabilities
         $total = $homeWinProb + $drawProb + $awayWinProb;
@@ -207,19 +227,26 @@ class PredictionService
         $drawProb /= $total;
         $awayWinProb /= $total;
         
-        // Goal predictions based on team attacking/defensive stats
+        // Goal predictions based on team attacking/defensive stats with league normalization
         $homeGoalsAvg = $homeStats ? $homeStats->avg_goals_for : $this->getDefaultGoalsFor($match->homeTeam);
         $awayGoalsAvg = $awayStats ? $awayStats->avg_goals_for : $this->getDefaultGoalsFor($match->awayTeam);
         $homeConcedeAvg = $homeStats ? $homeStats->avg_goals_against : $this->getDefaultGoalsAgainst($match->homeTeam);
         $awayConcedeAvg = $awayStats ? $awayStats->avg_goals_against : $this->getDefaultGoalsAgainst($match->awayTeam);
         
-        // Expected goals calculation
-        $homeExpectedGoals = ($homeGoalsAvg + $awayConcedeAvg) / 2 + ($homeAdvantage * 0.3);
-        $awayExpectedGoals = ($awayGoalsAvg + $homeConcedeAvg) / 2;
+        // More sophisticated expected goals calculation using attack vs defense strength
+        $homeAttackStrength = $homeGoalsAvg / max(0.5, $awayConcedeAvg); // Attack vs away defense
+        $awayAttackStrength = $awayGoalsAvg / max(0.5, $homeConcedeAvg); // Attack vs home defense
         
-        // Add some realistic variance
-        $homeGoals = max(0.3, $homeExpectedGoals + (rand(-10, 10) / 20));
-        $awayGoals = max(0.3, $awayExpectedGoals + (rand(-10, 10) / 20));
+        // League average goals per game (realistic baseline)
+        $leagueAvgGoals = 1.3; // Premier League average per team per game
+        
+        // Expected goals with strength-based calculation
+        $homeExpectedGoals = $leagueAvgGoals * $homeAttackStrength * (1 + $homeAdvantage);
+        $awayExpectedGoals = $leagueAvgGoals * $awayAttackStrength;
+        
+        // Apply realistic bounds and reduce extreme predictions
+        $homeGoals = max(0.5, min(3.5, $homeExpectedGoals));
+        $awayGoals = max(0.5, min(3.5, $awayExpectedGoals));
         
         // Determine predicted outcome
         $outcomes = ['home_win' => $homeWinProb, 'draw' => $drawProb, 'away_win' => $awayWinProb];
@@ -234,11 +261,27 @@ class PredictionService
         $totalGoals = $homeGoals + $awayGoals;
         $over25Prob = 1 / (1 + exp(-(($totalGoals - 2.5) * 2)));
         
-        // Confidence based on available data and strength difference
-        $dataQuality = ($homeStats && $awayStats) ? 0.7 : 0.4;
-        $strengthCertainty = 1 - abs($strengthDiff);
-        $confidence = ($dataQuality * 0.6) + ($strengthCertainty * 0.4) + 0.2;
-        $confidence = max(0.3, min(0.85, $confidence + (rand(-5, 5) / 100)));
+        // First half goals prediction (typically 40-45% of total match goals)
+        $firstHalfMultiplier = 0.42 + (rand(-3, 3) / 100); // 39%-45% variance
+        $homeGoalsFirstHalf = $homeGoals * $firstHalfMultiplier;
+        $awayGoalsFirstHalf = $awayGoals * $firstHalfMultiplier;
+        $totalFirstHalfGoals = $homeGoalsFirstHalf + $awayGoalsFirstHalf;
+        
+        // Over 0.5 First Half probability calculation
+        $over05FirstHalfProb = 1 - exp(-$totalFirstHalfGoals * 1.2); // Poisson-based
+        
+        // Confidence based on prediction certainty and data quality
+        $maxProbability = max($homeWinProb, $drawProb, $awayWinProb);
+        $dataQuality = ($homeStats && $awayStats) ? 0.8 : 0.5;
+        
+        // Base confidence on the winning probability (higher when more certain)
+        $probabilityCertainty = $maxProbability; // 0.33 (equal) to ~0.7 (strong favorite)
+        
+        // Confidence calculation - more realistic range
+        $confidence = ($dataQuality * 0.4) + ($probabilityCertainty * 0.6);
+        
+        // Apply realistic bounds: 45% to 80% (never too low or too high)
+        $confidence = max(0.45, min(0.80, $confidence));
         
         return [
             'home_goals_prediction' => round($homeGoals, 2),
@@ -249,10 +292,13 @@ class PredictionService
             'both_teams_score_probability' => round($bothTeamsScoreProb, 4),
             'over_2_5_probability' => round($over25Prob, 4),
             'under_2_5_probability' => round(1 - $over25Prob, 4),
+            'over_0_5_first_half_probability' => round($over05FirstHalfProb, 4),
+            'home_goals_first_half_prediction' => round($homeGoalsFirstHalf, 2),
+            'away_goals_first_half_prediction' => round($awayGoalsFirstHalf, 2),
             'predicted_outcome' => $predictedOutcome,
             'confidence_score' => round($confidence, 4),
-            'model_version' => 'enhanced_fallback_2.0',
-            'features_used' => ['team_strength', 'home_advantage', 'expected_goals', 'historical_data']
+            'model_version' => 'enhanced_fallback_2.4_fixed_seasons',
+            'features_used' => ['team_strength', 'home_advantage', 'expected_goals', 'first_half_analysis', 'historical_data']
         ];
     }
     
@@ -261,17 +307,22 @@ class PredictionService
         if (!$stats) {
             // Use team ID hash to create consistent but varied strength values
             $teamHash = crc32($team->name . $team->id) % 1000;
-            return 0.3 + ($teamHash / 1000 * 0.4); // Range: 0.3 to 0.7
+            return 0.4 + ($teamHash / 1000 * 0.2); // Range: 0.4 to 0.6 (more conservative)
         }
         
-        $winRate = $stats->wins / max(1, $stats->matches_played);
-        $goalDiffPerGame = $stats->goals_difference / max(1, $stats->matches_played);
-        $pointsPerGame = $stats->points / max(1, $stats->matches_played * 3);
+        $matchesPlayed = max(1, $stats->matches_played);
+        $winRate = $stats->wins / $matchesPlayed;
+        $pointsPerGame = $stats->points / ($matchesPlayed * 3); // Already normalized 0-1
+        $goalDiffPerGame = ($stats->goals_for - $stats->goals_against) / $matchesPlayed;
         
-        // Combine metrics with weights
-        $strength = ($winRate * 0.4) + ($pointsPerGame * 0.4) + (($goalDiffPerGame + 2) / 4 * 0.2);
+        // Normalize goal difference to 0-1 scale (assuming range -3 to +3 per game)
+        $normalizedGoalDiff = max(0, min(1, ($goalDiffPerGame + 3) / 6));
         
-        return max(0.1, min(0.9, $strength));
+        // Enhanced strength calculation with better balance
+        $strength = ($pointsPerGame * 0.5) + ($winRate * 0.3) + ($normalizedGoalDiff * 0.2);
+        
+        // More realistic range: 0.2 to 0.85 instead of 0.1 to 0.9
+        return max(0.2, min(0.85, $strength));
     }
     
     private function getDefaultGoalsFor($team): float
