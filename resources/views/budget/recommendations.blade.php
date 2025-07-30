@@ -47,9 +47,16 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Estrategia</label>
                     <div class="text-lg font-semibold text-purple-600">{{ ucfirst($budget->strategy) }}</div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Partidos Analizados</label>
-                    <div class="text-lg font-semibold text-gray-900" id="matches-count">Cargando...</div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Partidos Analizados</label>
+                        <div class="text-lg font-semibold text-gray-900" id="matches-count">Cargando...</div>
+                    </div>
+                    <button onclick="refreshRecommendations()" 
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                            id="refresh-btn">
+                        🔄 Actualizar
+                    </button>
                 </div>
             </div>
         </div>
@@ -72,7 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadRecommendations() {
-    fetch('{{ route("budget.opportunities", $budget) }}')
+    return fetch('{{ route("budget.opportunities", $budget) }}')
         .then(response => response.json())
         .then(data => {
             document.getElementById('matches-count').textContent = data.length;
@@ -106,11 +113,278 @@ function renderRecommendations(recommendations) {
 
     let html = '';
     
-    recommendations.forEach((recommendation, index) => {
-        html += renderMatchRecommendation(recommendation, index);
+    recommendations.forEach((match, index) => {
+        html += renderMatchWithRecommendations(match, index);
     });
     
     container.innerHTML = html;
+}
+
+function renderMatchWithRecommendations(matchData, index) {
+    const liveIndicator = matchData.is_live ? '🔴 EN VIVO' : '';
+    
+    return `
+        <div class="bg-white shadow rounded-lg mb-6">
+            <!-- Match Header -->
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div class="text-center">
+                            <div class="text-lg font-bold text-gray-900">${matchData.home_team.short_name}</div>
+                            <div class="text-sm text-gray-500">Local</div>
+                        </div>
+                        <div class="text-center px-4">
+                            <div class="text-sm text-gray-500">vs</div>
+                            <div class="text-xs text-gray-400">${matchData.prediction_details.home_goals_prediction} - ${matchData.prediction_details.away_goals_prediction}</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-lg font-bold text-gray-900">${matchData.away_team.short_name}</div>
+                            <div class="text-sm text-gray-500">Visitante</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm font-medium text-gray-700">
+                            ${matchData.match_date}
+                            ${matchData.is_live ? `<span class="text-red-600 ml-2">${liveIndicator}</span>` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            <span class="font-medium">${matchData.league}</span>
+                            ${matchData.round ? ` • Jornada ${matchData.round}` : ''}
+                        </div>
+                        ${matchData.current_score ? `<div class="text-sm font-bold text-red-600 mt-1">${matchData.current_score}</div>` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Match Analysis -->
+            <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+                    <div>
+                        <div class="text-sm text-gray-500">Goles esperados</div>
+                        <div class="font-medium">${matchData.prediction_details.total_goals_prediction.toFixed(1)}</div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Confianza máxima</div>
+                        <div class="font-medium">${parseFloat(matchData.max_confidence).toFixed(2)}%</div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Recomendaciones</div>
+                        <div class="font-medium">${matchData.recommendations.length}</div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Modelo IA</div>
+                        <div class="font-medium text-xs">${matchData.prediction_details.model_version}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="px-6 py-4">
+                <h3 class="text-lg font-medium text-gray-900 mb-4">
+                    Recomendaciones (${matchData.recommendations.length})
+                </h3>
+                
+                <div class="space-y-4">
+                    ${matchData.recommendations.map(rec => renderSingleRecommendation(rec, matchData.match_id)).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderSingleRecommendation(rec, matchId) {
+    const levelColor = getRecommendationLevelColor(rec.analysis.recommendation_level);
+    const riskColor = getRiskLevelColor(rec.analysis.risk_level);
+    
+    return `
+        <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow" data-match-id="${matchId}" data-bet-type="${rec.bet_type}">
+            <div class="flex items-start justify-between mb-3">
+                <div>
+                    <h4 class="text-lg font-semibold text-gray-900">${rec.bet_type_display}</h4>
+                    <p class="text-sm text-gray-600">Confianza IA: ${parseFloat(rec.confidence).toFixed(2)}%</p>
+                </div>
+                <div class="flex space-x-2">
+                    <span class="px-2 py-1 text-xs font-medium rounded-full bg-${levelColor}-100 text-${levelColor}-800">
+                        ${rec.analysis.recommendation_level}
+                    </span>
+                    <span class="px-2 py-1 text-xs font-medium rounded-full bg-${riskColor}-100 text-${riskColor}-800">
+                        Riesgo ${rec.analysis.risk_level}
+                    </span>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+                <div>
+                    <div class="text-xs text-gray-500">Confianza</div>
+                    <div class="font-bold text-lg text-blue-600">${parseFloat(rec.confidence).toFixed(2)}%</div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500">Cuota</div>
+                    <div class="font-bold text-lg text-green-600">${rec.odds}</div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500">Cantidad</div>
+                    <div class="font-bold text-lg text-purple-600">€${rec.recommended_amount}</div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500">Ganancia</div>
+                    <div class="font-bold text-lg text-green-600">€${rec.potential_profit}</div>
+                </div>
+            </div>
+            
+            <!-- Value Betting Indicator -->
+            ${rec.analysis.value_rating > 5 ? `
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
+                    <div class="flex items-center">
+                        <div class="text-yellow-600 mr-2">⭐</div>
+                        <div>
+                            <div class="font-medium text-yellow-900">Value Bet detectado</div>
+                            <div class="text-sm text-yellow-800">+${parseFloat(rec.analysis.value_rating).toFixed(2)}% de valor según nuestro análisis</div>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Action Buttons -->
+            <div class="flex space-x-3">
+                <button onclick="placeBet('${matchId}', '${rec.bet_type}', ${rec.odds}, ${rec.recommended_amount})"
+                        class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    Apostar €${rec.recommended_amount}
+                </button>
+                <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.odds}, ${rec.confidence})"
+                        class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
+                    Personalizar
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function renderSimpleRecommendation(rec, index) {
+    const liveIndicator = rec.is_live ? '🔴 EN VIVO' : '';
+    const urgencyColor = rec.urgency === 'ALTA' ? 'red' : rec.urgency === 'MEDIA' ? 'yellow' : 'green';
+    const levelColor = getRecommendationLevelColor(rec.analysis.recommendation_level);
+    const riskColor = getRiskLevelColor(rec.analysis.risk_level);
+    
+    return `
+        <div class="bg-white shadow rounded-lg mb-6">
+            <!-- Match Header -->
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div class="text-center">
+                            <div class="text-lg font-bold text-gray-900">${rec.home_team.short_name}</div>
+                            <div class="text-sm text-gray-500">Local</div>
+                        </div>
+                        <div class="text-center px-4">
+                            <div class="text-sm text-gray-500">vs</div>
+                            <div class="text-xs text-gray-400">${rec.prediction_details.home_goals_prediction} - ${rec.prediction_details.away_goals_prediction}</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-lg font-bold text-gray-900">${rec.away_team.short_name}</div>
+                            <div class="text-sm text-gray-500">Visitante</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm font-medium text-gray-700">
+                            ${rec.match_date}
+                            ${rec.is_live ? `<span class="text-red-600 ml-2">${liveIndicator}</span>` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            <span class="font-medium">${rec.league}</span>
+                            ${rec.round ? ` • Jornada ${rec.round}` : ''}
+                        </div>
+                        ${rec.current_score ? `<div class="text-sm font-bold text-red-600 mt-1">${rec.current_score}</div>` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Match Analysis -->
+            <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+                    <div>
+                        <div class="text-sm text-gray-500">Goles esperados</div>
+                        <div class="font-medium">${rec.prediction_details.total_goals_prediction.toFixed(1)}</div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Dificultad</div>
+                        <div class="font-medium">${rec.analysis.difficulty_level}</div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Valor detectado</div>
+                        <div class="font-medium ${rec.analysis.value_rating > 5 ? 'text-green-600' : 'text-gray-600'}">
+                            ${rec.analysis.value_rating > 0 ? '+' + parseFloat(rec.analysis.value_rating).toFixed(2) + '%' : 'Neutro'}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Modelo IA</div>
+                        <div class="font-medium text-xs">${rec.prediction_details.model_version}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recommendation Details -->
+            <div class="px-6 py-4">
+                <div class="flex items-start justify-between mb-4">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-900">${rec.bet_type_display}</h4>
+                        <p class="text-sm text-gray-600">Recomendación de la IA para este partido</p>
+                    </div>
+                    <div class="flex space-x-2">
+                        <span class="px-3 py-1 text-xs font-medium rounded-full bg-${levelColor}-100 text-${levelColor}-800">
+                            ${rec.analysis.recommendation_level}
+                        </span>
+                        <span class="px-3 py-1 text-xs font-medium rounded-full bg-${riskColor}-100 text-${riskColor}-800">
+                            Riesgo ${rec.analysis.risk_level}
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                        <div class="text-xs text-gray-500">Confianza IA</div>
+                        <div class="font-bold text-lg text-blue-600">${rec.confidence}%</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500">Cuota</div>
+                        <div class="font-bold text-lg text-green-600">${rec.odds}</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500">Cantidad recomendada</div>
+                        <div class="font-bold text-lg text-purple-600">€${rec.recommended_amount}</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500">Ganancia potencial</div>
+                        <div class="font-bold text-lg text-green-600">€${rec.potential_profit}</div>
+                    </div>
+                </div>
+                
+                <!-- Value Betting Indicator -->
+                ${rec.analysis.value_rating > 5 ? `
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                        <div class="flex items-center">
+                            <div class="text-yellow-600 mr-2">⭐</div>
+                            <div>
+                                <div class="font-medium text-yellow-900">Value Bet detectado</div>
+                                <div class="text-sm text-yellow-800">+${parseFloat(rec.analysis.value_rating).toFixed(2)}% de valor según nuestro análisis</div>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <div class="flex space-x-3">
+                    <button onclick="placeBet('${rec.match_id}', '${rec.bet_type}', ${rec.odds}, ${rec.recommended_amount})"
+                            class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Apostar €${rec.recommended_amount}
+                    </button>
+                    <button onclick="customBet('${rec.match_id}', '${rec.bet_type}', ${rec.odds}, ${rec.confidence})"
+                            class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
+                        Personalizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function renderMatchRecommendation(data, index) {
@@ -211,7 +485,7 @@ function renderRecommendation(rec, matchId) {
     const riskColor = riskColors[rec.risk_level] || 'gray';
     
     return `
-        <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+        <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow" data-match-id="${matchId}" data-bet-type="${rec.bet_type}">
             <div class="flex items-start justify-between mb-3">
                 <div>
                     <h4 class="text-lg font-semibold text-gray-900">${rec.label}</h4>
@@ -312,18 +586,31 @@ function placeBet(matchId, betType, odds, amount) {
                 amount: amount
             })
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
-                alert('Apuesta realizada con éxito');
-                location.reload();
+                // Mostrar notificación de éxito
+                showSuccessNotification('✅ Apuesta exitosa: €' + amount + ' apostados. Nuevo balance: €' + data.new_balance.toFixed(2));
+                
+                // Actualizar balance mostrado
+                updateDisplayedBalance(data.new_balance);
+                
+                // Eliminar la recomendación de la lista
+                removeRecommendationFromList(matchId, betType);
+                
             } else {
-                alert('Error: ' + (data.message || 'No se pudo realizar la apuesta'));
+                // Mostrar error específico del servidor
+                showErrorNotification('❌ Error: ' + (data.message || 'No se pudo realizar la apuesta'));
             }
         })
         .catch(error => {
-            console.error('Error:', error);
-            alert('Error al realizar la apuesta');
+            console.error('Error al realizar apuesta:', error);
+            showErrorNotification('❌ Error de conexión: ' + error.message);
         });
     }
 }
@@ -396,9 +683,46 @@ function getBetTypeDisplay(betType) {
         'draw': 'Empate',
         'over_2_5': 'Más de 2.5 Goles',
         'under_2_5': 'Menos de 2.5 Goles',
-        'both_teams_score': 'Ambos Equipos Marcan'
+        'both_teams_score': 'Ambos Equipos Marcan',
+        'over_0_5_first_half': 'Over 0.5 1T'
     };
     return types[betType] || betType;
+}
+
+function getRecommendationLevelColor(level) {
+    const colors = {
+        'EXCELENTE': 'green',
+        'MUY BUENA': 'blue',
+        'BUENA': 'indigo',
+        'ACEPTABLE': 'gray'
+    };
+    return colors[level] || 'gray';
+}
+
+function getRiskLevelColor(level) {
+    const colors = {
+        'BAJO': 'green',
+        'MEDIO': 'yellow',
+        'ALTO': 'red'
+    };
+    return colors[level] || 'gray';
+}
+
+
+function updateDisplayedBalance(newBalance) {
+    const balanceElements = document.querySelectorAll('.budget-balance');
+    balanceElements.forEach(element => {
+        element.textContent = '€' + parseFloat(newBalance).toFixed(2);
+    });
+    
+    // Update the header balance if it exists
+    const headerBalance = document.querySelector('[class*="text-2xl"][class*="font-bold"]');
+    if (headerBalance && headerBalance.textContent.includes('€')) {
+        headerBalance.textContent = '€' + parseFloat(newBalance).toLocaleString('es-ES', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
 }
 
 function getOddsSourceLabel(source) {
@@ -530,7 +854,7 @@ function confirmCustomBet(matchId, betType) {
     // Cerrar modal
     closeCustomBetModal();
     
-    // Realizar apuesta
+    // Realizar apuesta con eliminación automática
     placeBet(matchId, betType, odds, amount);
 }
 
@@ -541,6 +865,33 @@ function closeCustomBetModal() {
     }
 }
 
+function refreshRecommendations() {
+    const refreshBtn = document.getElementById('refresh-btn');
+    const originalText = refreshBtn.innerHTML;
+    
+    // Mostrar estado de carga
+    refreshBtn.innerHTML = '⏳ Actualizando...';
+    refreshBtn.disabled = true;
+    
+    // Mostrar loading en el contenedor
+    document.getElementById('recommendations-container').innerHTML = `
+        <div class="flex items-center justify-center py-12">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                <p class="text-gray-500">Actualizando recomendaciones...</p>
+            </div>
+        </div>
+    `;
+    
+    // Recargar recomendaciones
+    loadRecommendations()
+        .finally(() => {
+            // Restaurar botón
+            refreshBtn.innerHTML = originalText;
+            refreshBtn.disabled = false;
+        });
+}
+
 function showError(message) {
     document.getElementById('recommendations-container').innerHTML = `
         <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
@@ -549,8 +900,126 @@ function showError(message) {
             </svg>
             <h3 class="text-lg font-medium text-red-900 mb-2">Error</h3>
             <p class="text-red-700">${message}</p>
+            <button onclick="refreshRecommendations()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700">
+                🔄 Reintentar
+            </button>
         </div>
     `;
+}
+
+function showSuccessNotification(message) {
+    // Crear notificación de éxito temporal
+    const notification = document.createElement('div');
+    notification.className = 'fixed top-4 right-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded z-50 shadow-lg max-w-md';
+    notification.innerHTML = `
+        <div class="flex items-center">
+            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+            </svg>
+            <span>${message}</span>
+            <button onclick="this.parentElement.parentElement.remove()" class="ml-2 text-green-600 hover:text-green-800">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                </svg>
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-eliminar después de 5 segundos
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.remove();
+        }
+    }, 5000);
+}
+
+function showErrorNotification(message) {
+    // Crear notificación de error temporal
+    const notification = document.createElement('div');
+    notification.className = 'fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-50 shadow-lg max-w-md';
+    notification.innerHTML = `
+        <div class="flex items-center">
+            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+            </svg>
+            <span>${message}</span>
+            <button onclick="this.parentElement.parentElement.remove()" class="ml-2 text-red-600 hover:text-red-800">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                </svg>
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-eliminar después de 7 segundos (más tiempo para errores)
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.remove();
+        }
+    }, 7000);
+}
+
+function removeRecommendationFromList(matchId, betType) {
+    // Buscar y eliminar la recomendación específica de la lista
+    const allRecommendations = document.querySelectorAll('[data-match-id="' + matchId + '"][data-bet-type="' + betType + '"]');
+    
+    allRecommendations.forEach(element => {
+        // Agregar animación de salida
+        element.style.transition = 'all 0.3s ease-out';
+        element.style.opacity = '0';
+        element.style.transform = 'translateX(100%)';
+        
+        // Eliminar después de la animación
+        setTimeout(() => {
+            element.remove();
+            checkIfMatchHasNoRecommendations(matchId);
+        }, 300);
+    });
+    
+    // Buscar por estructura alternativa si no tiene data attributes
+    const recommendationButtons = document.querySelectorAll(`button[onclick*="placeBet('${matchId}', '${betType}'"]`);
+    recommendationButtons.forEach(button => {
+        const recommendationCard = button.closest('.border');
+        if (recommendationCard) {
+            recommendationCard.style.transition = 'all 0.3s ease-out';
+            recommendationCard.style.opacity = '0';
+            recommendationCard.style.transform = 'translateX(100%)';
+            
+            setTimeout(() => {
+                recommendationCard.remove();
+                checkIfMatchHasNoRecommendations(matchId);
+            }, 300);
+        }
+    });
+}
+
+function checkIfMatchHasNoRecommendations(matchId) {
+    // Verificar si el partido ya no tiene recomendaciones
+    const matchContainer = document.querySelector(`[data-match-id="${matchId}"]`)?.closest('.bg-white');
+    
+    if (matchContainer) {
+        const remainingRecommendations = matchContainer.querySelectorAll('.border');
+        
+        if (remainingRecommendations.length === 0) {
+            // Agregar mensaje de que no quedan recomendaciones
+            const noRecsMessage = document.createElement('div');
+            noRecsMessage.className = 'text-center py-4 text-gray-500';
+            noRecsMessage.innerHTML = `
+                <div class="text-sm">
+                    ✅ Todas las recomendaciones para este partido han sido apostadas
+                </div>
+            `;
+            
+            const recommendationsContainer = matchContainer.querySelector('.space-y-4');
+            if (recommendationsContainer) {
+                recommendationsContainer.appendChild(noRecsMessage);
+            }
+        }
+    }
 }
 </script>
 @endsection
