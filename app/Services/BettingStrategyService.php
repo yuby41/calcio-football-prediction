@@ -130,7 +130,9 @@ class BettingStrategyService
 
     public function getRecommendedOdds(string $betType, FootballMatch $match): float
     {
-        // Odds simuladas basadas en probabilidades de predicción
+        // DEPRECATED: Este método genera odds irreales
+        // Usar FootballApiOddsService::getRealOddsForMatch() en su lugar
+        
         if (!$match->prediction) return 2.0;
 
         return match($betType) {
@@ -140,6 +142,7 @@ class BettingStrategyService
             'over_2_5' => $this->probabilityToOdds($match->prediction->over_2_5_probability),
             'under_2_5' => $this->probabilityToOdds($match->prediction->under_2_5_probability),
             'both_teams_score' => $this->probabilityToOdds($match->prediction->both_teams_score_probability),
+            'over_0_5_first_half' => $this->probabilityToOdds($match->prediction->over_0_5_first_half_probability),
             default => 2.0,
         };
     }

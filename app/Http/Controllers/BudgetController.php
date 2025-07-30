@@ -9,6 +9,7 @@ use App\Models\BettingStrategy;
 use App\Models\FootballMatch;
 use App\Services\BettingStrategyService;
 use App\Services\BettingRecommendationService;
+use App\Services\FootballApiOddsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -17,13 +18,16 @@ class BudgetController extends Controller
 {
     protected BettingStrategyService $bettingService;
     protected BettingRecommendationService $recommendationService;
+    protected FootballApiOddsService $oddsService;
 
     public function __construct(
         BettingStrategyService $bettingService,
-        BettingRecommendationService $recommendationService
+        BettingRecommendationService $recommendationService,
+        FootballApiOddsService $oddsService
     ) {
         $this->bettingService = $bettingService;
         $this->recommendationService = $recommendationService;
+        $this->oddsService = $oddsService;
     }
 
     public function index()
@@ -119,7 +123,7 @@ class BudgetController extends Controller
 
             $validated = $request->validate([
                 'match_id' => 'required|exists:matches,id',
-                'bet_type' => 'required|in:home_win,away_win,draw,over_2_5,under_2_5,both_teams_score',
+                'bet_type' => 'required|in:home_win,away_win,draw,over_2_5,under_2_5,both_teams_score,over_0_5_first_half',
                 'odds' => 'required|numeric|min:1.01|max:50',
                 'amount' => 'nullable|integer|min:2',
             ]);
@@ -217,8 +221,8 @@ class BudgetController extends Controller
 
     public function opportunities(BudgetConfiguration $budget): JsonResponse
     {
-        $recommendations = $this->recommendationService->getRecommendationsForBudget($budget);
-        return response()->json($recommendations);
+        $opportunities = $this->getBettingOpportunities($budget);
+        return response()->json($opportunities);
     }
 
     private function getChartData(BudgetConfiguration $budget): array
@@ -319,7 +323,7 @@ class BudgetController extends Controller
         foreach ($upcomingMatches as $match) {
             if (!$match->prediction) continue;
 
-            $betTypes = ['home_win', 'away_win', 'draw', 'over_2_5', 'both_teams_score'];
+            $betTypes = ['home_win', 'away_win', 'draw', 'over_2_5', 'both_teams_score', 'over_0_5_first_half'];
             
             foreach ($betTypes as $betType) {
                 $confidence = $this->getConfidenceForBetType($match, $betType);
@@ -332,7 +336,44 @@ class BudgetController extends Controller
                         $confidence
                     );
                     
-                    $odds = $this->bettingService->getRecommendedOdds($betType, $match);
+                    // Obtener odds reales del servicio de odds
+                    $realOdds = $this->oddsService->getRealOddsForMatch($match);
+                    
+                    // Si no hay odds reales disponibles para este tipo de apuesta, saltar
+                    if (!isset($realOdds[$betType])) {
+                        continue;
+                    }
+                    
+                    $odds = $realOdds[$betType];
+                    $oddsSource = $realOdds[$betType . '_source'] ?? $realOdds['source'] ?? 'unknown';
+                    
+                    // Validar que las odds sean realistas
+                    $originalOdds = $odds;
+                    if (!$this->areOddsRealistic($betType, $odds, $confidence)) {
+                        // Usar odds corregidas
+                        $odds = $this->correctUnrealisticOdds($betType, $odds, $confidence);
+                        
+                        // Log para debugging
+                        \Log::info('Odds no realistas corregidas en recomendaciones IA', [
+                            'match' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
+                            'match_id' => $match->id,
+                            'bet_type' => $betType,
+                            'original_odds' => $originalOdds,
+                            'corrected_odds' => $odds,
+                            'confidence' => $confidence,
+                            'source' => $oddsSource,
+                            'improvement' => 'Odds ajustadas a rango realista con coherencia IA'
+                        ]);
+                    } else {
+                        // Log odds válidas para tracking
+                        \Log::debug('Odds válidas en recomendaciones IA', [
+                            'match' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
+                            'bet_type' => $betType,
+                            'odds' => $odds,
+                            'confidence' => $confidence,
+                            'source' => $oddsSource
+                        ]);
+                    }
                     
                     // Ajustar odds para partidos en vivo (mayor volatilidad)
                     if ($match->status === 'live') {
@@ -343,34 +384,209 @@ class BudgetController extends Controller
                         'match_id' => $match->id,
                         'match_name' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
                         'match_date' => $match->match_date->format('d/m/Y H:i'),
+                        'league' => $match->league,
+                        'season' => $match->season,
+                        'round' => $match->round,
+                        'home_team' => [
+                            'id' => $match->homeTeam->id,
+                            'name' => $match->homeTeam->name,
+                            'short_name' => $this->getShortName($match->homeTeam->name)
+                        ],
+                        'away_team' => [
+                            'id' => $match->awayTeam->id,
+                            'name' => $match->awayTeam->name,
+                            'short_name' => $this->getShortName($match->awayTeam->name)
+                        ],
                         'bet_type' => $betType,
                         'bet_type_display' => (new Bet(['bet_type' => $betType]))->getBetTypeDisplayAttribute(),
                         'confidence' => $confidence,
                         'recommended_amount' => $recommendedAmount,
                         'odds' => $odds,
-                        'potential_profit' => ($recommendedAmount * $odds) - $recommendedAmount,
+                        'odds_source' => $oddsSource,
+                        'potential_profit' => round(($recommendedAmount * $odds) - $recommendedAmount, 2),
                         'is_live' => $match->status === 'live',
                         'match_status' => $match->status,
                         'live_indicator' => $match->status === 'live' ? '🔴 EN VIVO' : '',
                         'urgency' => $match->status === 'live' ? 'ALTA' : $this->getMatchUrgency($match),
                         'current_score' => $match->status === 'live' ? 
                             "{$match->home_goals}-{$match->away_goals}" : null,
+                        'prediction_details' => [
+                            'home_goals_prediction' => $match->prediction->home_goals_prediction ?? 0,
+                            'away_goals_prediction' => $match->prediction->away_goals_prediction ?? 0,
+                            'total_goals_prediction' => ($match->prediction->home_goals_prediction ?? 0) + ($match->prediction->away_goals_prediction ?? 0),
+                            'model_version' => $match->prediction->model_version ?? 'unknown'
+                        ],
+                        'analysis' => [
+                            'difficulty_level' => $this->getMatchDifficulty($confidence),
+                            'value_rating' => $this->calculateValueRating($confidence, $odds),
+                            'recommendation_level' => $this->getRecommendationLevel($confidence),
+                            'risk_level' => $this->getRiskLevel($odds, $confidence)
+                        ]
                     ];
                 }
             }
         }
 
-        // Ordenar por prioridad: 1) Partidos en vivo, 2) Confianza descendente
-        usort($opportunities, function($a, $b) {
-            // Priorizar partidos en vivo
-            if ($a['is_live'] && !$b['is_live']) return -1;
-            if (!$a['is_live'] && $b['is_live']) return 1;
+        // Agrupar por partido
+        $groupedOpportunities = [];
+        foreach ($opportunities as $opportunity) {
+            $matchId = $opportunity['match_id'];
             
-            // Si ambos tienen el mismo status, ordenar por confianza
-            return $b['confidence'] <=> $a['confidence'];
+            if (!isset($groupedOpportunities[$matchId])) {
+                // Crear la estructura del partido
+                $groupedOpportunities[$matchId] = [
+                    'match_id' => $opportunity['match_id'],
+                    'match_name' => $opportunity['match_name'],
+                    'match_date' => $opportunity['match_date'],
+                    'league' => $opportunity['league'],
+                    'season' => $opportunity['season'],
+                    'round' => $opportunity['round'],
+                    'home_team' => $opportunity['home_team'],
+                    'away_team' => $opportunity['away_team'],
+                    'is_live' => $opportunity['is_live'],
+                    'match_status' => $opportunity['match_status'],
+                    'live_indicator' => $opportunity['live_indicator'],
+                    'current_score' => $opportunity['current_score'],
+                    'prediction_details' => $opportunity['prediction_details'],
+                    'max_confidence' => round($opportunity['confidence'], 2),
+                    'urgency' => $opportunity['urgency'],
+                    'recommendations' => []
+                ];
+            }
+            
+            // Agregar la recomendación específica
+            $groupedOpportunities[$matchId]['recommendations'][] = [
+                'bet_type' => $opportunity['bet_type'],
+                'bet_type_display' => $opportunity['bet_type_display'],
+                'confidence' => round($opportunity['confidence'], 2),
+                'recommended_amount' => $opportunity['recommended_amount'],
+                'odds' => $opportunity['odds'],
+                'odds_source' => $opportunity['odds_source'] ?? 'unknown',
+                'potential_profit' => $opportunity['potential_profit'],
+                'analysis' => $opportunity['analysis']
+            ];
+            
+            // Actualizar la confianza máxima para ordenamiento
+            if ($opportunity['confidence'] > $groupedOpportunities[$matchId]['max_confidence']) {
+                $groupedOpportunities[$matchId]['max_confidence'] = round($opportunity['confidence'], 2);
+            }
+        }
+
+        // Convertir a array indexado y ordenar
+        $groupedArray = array_values($groupedOpportunities);
+        
+        // Ordenar por calidad de las recomendaciones (score combinado)
+        usort($groupedArray, function($a, $b) {
+            $scoreA = $this->calculateMatchRecommendationScore($a);
+            $scoreB = $this->calculateMatchRecommendationScore($b);
+            
+            return $scoreB <=> $scoreA; // Ordenar de mayor a menor score
         });
 
-        return array_slice($opportunities, 0, 25); // Top 25 oportunidades (más para incluir live)
+        return array_slice($groupedArray, 0, 15); // Top 15 partidos (cada partido puede tener múltiples recomendaciones)
+    }
+
+    /**
+     * Calcula un score de calidad para un partido basado en múltiples factores
+     * Combina: confianza, valor, cantidad de recomendaciones, urgencia
+     */
+    private function calculateMatchRecommendationScore(array $matchData): float
+    {
+        $score = 0;
+        
+        // Factor 1: Confianza máxima (0-100 puntos)
+        $confidenceScore = $matchData['max_confidence'];
+        $score += $confidenceScore;
+        
+        // Factor 2: Cantidad de recomendaciones (más opciones = mejor, máx 30 puntos)
+        $recommendationCount = count($matchData['recommendations']);
+        $countScore = min($recommendationCount * 10, 30);
+        $score += $countScore;
+        
+        // Factor 3: Value Rating promedio (puede agregar hasta 50 puntos)
+        $totalValueRating = 0;
+        $valueCount = 0;
+        foreach ($matchData['recommendations'] as $rec) {
+            if ($rec['analysis']['value_rating'] > 0) {
+                $totalValueRating += $rec['analysis']['value_rating'];
+                $valueCount++;
+            }
+        }
+        $avgValueRating = $valueCount > 0 ? $totalValueRating / $valueCount : 0;
+        $valueScore = min($avgValueRating * 0.5, 50); // Máximo 50 puntos por valor
+        $score += $valueScore;
+        
+        // Factor 4: Bonus por partidos en vivo (urgencia, pero no prioridad absoluta)
+        if ($matchData['is_live']) {
+            $liveBonus = 15; // Bonus moderado para partidos en vivo
+            $score += $liveBonus;
+        }
+        
+        // Factor 5: Bonus por múltiples recomendaciones de alta calidad
+        $highQualityCount = 0;
+        foreach ($matchData['recommendations'] as $rec) {
+            if ($rec['confidence'] >= 75) {
+                $highQualityCount++;
+            }
+        }
+        if ($highQualityCount >= 2) {
+            $qualityBonus = $highQualityCount * 5; // 5 puntos por cada recomendación de alta calidad
+            $score += $qualityBonus;
+        }
+        
+        // Factor 6: Penalización por baja confianza general
+        if ($matchData['max_confidence'] < 60) {
+            $lowConfidencePenalty = (60 - $matchData['max_confidence']) * 0.5;
+            $score -= $lowConfidencePenalty;
+        }
+        
+        return $score;
+    }
+
+    private function getShortName(string $name): string
+    {
+        $words = explode(' ', $name);
+        if (count($words) <= 2) {
+            return $name;
+        }
+        
+        // Tomar primera palabra y última palabra si hay más de 2
+        return $words[0] . ' ' . end($words);
+    }
+
+    private function getMatchDifficulty(float $confidence): string
+    {
+        if ($confidence >= 85) return 'Fácil';
+        if ($confidence >= 70) return 'Moderada';
+        if ($confidence >= 55) return 'Difícil';
+        return 'Muy Difícil';
+    }
+
+    private function calculateValueRating(float $confidence, float $odds): float
+    {
+        // Calcular valor implícito vs probabilidad de la IA
+        $impliedProbability = (1 / $odds) * 100;
+        $valueRating = $confidence - $impliedProbability;
+        
+        return round(max(0, $valueRating), 2);
+    }
+
+    private function getRecommendationLevel(float $confidence): string
+    {
+        if ($confidence >= 80) return 'EXCELENTE';
+        if ($confidence >= 70) return 'MUY BUENA';
+        if ($confidence >= 60) return 'BUENA';
+        return 'ACEPTABLE';
+    }
+
+    private function getRiskLevel(float $odds, float $confidence): string
+    {
+        // Combinar odds y confianza para evaluar riesgo
+        $riskScore = ($odds - 1) * (100 - $confidence) / 100;
+        
+        if ($riskScore <= 1.5) return 'BAJO';
+        if ($riskScore <= 3.0) return 'MEDIO';
+        return 'ALTO';
     }
 
     private function getConfidenceForBetType(FootballMatch $match, string $betType): float
@@ -384,11 +600,12 @@ class BudgetController extends Controller
             'over_2_5' => $match->prediction->over_2_5_probability ?? 0,
             'under_2_5' => $match->prediction->under_2_5_probability ?? 0,
             'both_teams_score' => $match->prediction->both_teams_score_probability ?? 0,
+            'over_0_5_first_half' => $match->prediction->over_0_5_first_half_probability ?? 0,
             default => 0,
         };
 
-        // Convertir de probabilidad (0-1) a porcentaje (0-100)
-        return $probability * 100;
+        // Convertir de probabilidad (0-1) a porcentaje (0-100) y redondear a 2 decimales
+        return round($probability * 100, 2);
     }
 
     /**
@@ -422,6 +639,7 @@ class BudgetController extends Controller
             'over_2_5' => 0.25,      // Goles muy volátiles en vivo
             'under_2_5' => 0.25,
             'both_teams_score' => 0.20,
+            'over_0_5_first_half' => 0.30,  // Muy volátil - se decide rápido en 1T
         ];
         
         $baseVolatility = $volatilities[$betType] ?? 0.15;
@@ -641,6 +859,113 @@ class BudgetController extends Controller
                 'success' => false,
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Valida si las odds son realistas para el tipo de apuesta y confianza
+     */
+    private function areOddsRealistic(string $betType, float $odds, float $confidence): bool
+    {
+        // Rangos realistas para cada tipo de apuesta
+        $realisticRanges = [
+            'home_win' => ['min' => 1.1, 'max' => 15.0],
+            'away_win' => ['min' => 1.1, 'max' => 20.0],
+            'draw' => ['min' => 2.2, 'max' => 6.5],
+            'over_2_5' => ['min' => 1.2, 'max' => 5.0],
+            'under_2_5' => ['min' => 1.2, 'max' => 5.0],
+            'both_teams_score' => ['min' => 1.3, 'max' => 4.0],
+            'over_0_5_first_half' => ['min' => 1.15, 'max' => 2.3],
+        ];
+
+        $range = $realisticRanges[$betType] ?? ['min' => 1.1, 'max' => 10.0];
+        
+        // Verificar que las odds estén en rango realista
+        if ($odds < $range['min'] || $odds > $range['max']) {
+            return false;
+        }
+
+        // Verificar coherencia con la confianza (probabilidad vs odds)
+        $impliedProbability = (1 / $odds) * 100;
+        $probabilityDifference = abs($confidence - $impliedProbability);
+        
+        // Si la diferencia es muy grande (>40%), las odds pueden ser irreales
+        if ($probabilityDifference > 40) {
+            return false;
+        }
+
+        // Para confianzas muy altas, las odds no pueden ser muy altas
+        if ($confidence >= 80 && $odds > 2.5) {
+            return false;
+        }
+
+        // Para confianzas bajas, las odds no pueden ser muy bajas
+        if ($confidence <= 60 && $odds < 1.5) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Corrige odds no realistas aplicando límites y coherencia
+     */
+    private function correctUnrealisticOdds(string $betType, float $odds, float $confidence): float
+    {
+        // Rangos realistas para cada tipo de apuesta
+        $realisticRanges = [
+            'home_win' => ['min' => 1.1, 'max' => 15.0],
+            'away_win' => ['min' => 1.1, 'max' => 20.0], 
+            'draw' => ['min' => 2.2, 'max' => 6.5],
+            'over_2_5' => ['min' => 1.2, 'max' => 5.0],
+            'under_2_5' => ['min' => 1.2, 'max' => 5.0],
+            'both_teams_score' => ['min' => 1.3, 'max' => 4.0],
+            'over_0_5_first_half' => ['min' => 1.15, 'max' => 2.3],
+        ];
+
+        $range = $realisticRanges[$betType] ?? ['min' => 1.1, 'max' => 10.0];
+        
+        // Primero aplicar límites de rango
+        $correctedOdds = max($range['min'], min($range['max'], $odds));
+        
+        // Luego ajustar por coherencia con confianza
+        $targetProbability = $confidence / 100;
+        $targetOdds = 1 / $targetProbability;
+        
+        // Aplicar margen típico de bookmaker (5-8%)
+        $margin = match($betType) {
+            'home_win', 'away_win', 'draw' => 1.05,
+            'over_2_5', 'under_2_5' => 1.07,
+            'both_teams_score' => 1.08,
+            'over_0_5_first_half' => 1.06,
+            default => 1.06
+        };
+        
+        $targetOdds *= $margin;
+        
+        // Usar un promedio ponderado entre odds original corregida y odds basada en confianza
+        $finalOdds = ($correctedOdds * 0.6) + ($targetOdds * 0.4);
+        
+        // Aplicar límites finales y redondear
+        $finalOdds = max($range['min'], min($range['max'], $finalOdds));
+        
+        return $this->roundOddsToNatural($finalOdds);
+    }
+
+    /**
+     * Redondea odds a valores más naturales que se ven en casas de apuestas
+     */
+    private function roundOddsToNatural(float $odds): float
+    {
+        if ($odds < 2.0) {
+            // Para odds bajas, redondear a .05 (.05, .10, .15, etc.)
+            return round($odds * 20) / 20;
+        } elseif ($odds < 5.0) {
+            // Para odds medias, redondear a .1 (.1, .2, .3, etc.)
+            return round($odds * 10) / 10;
+        } else {
+            // Para odds altas, redondear a .0 o .5 
+            return round($odds * 2) / 2;
         }
     }
 }

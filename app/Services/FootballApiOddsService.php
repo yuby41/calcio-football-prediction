@@ -273,6 +273,7 @@ class FootballApiOddsService
             'over_2_5' => $this->generateOverUnderOdds($homeStrength, $awayStrength, true),
             'under_2_5' => $this->generateOverUnderOdds($homeStrength, $awayStrength, false),
             'both_teams_score' => $this->generateBothTeamsScoreOdds($homeStrength, $awayStrength),
+            'over_0_5_first_half' => $this->generateOver05FirstHalfOdds($homeStrength, $awayStrength),
         ];
         
         // Agregar source a cada odd individual
@@ -379,6 +380,17 @@ class FootballApiOddsService
         
         $odds = 1 / $bothScoreProbability * 1.08; // 8% margen
         return $this->roundOdds(max(1.4, min(3.5, $odds)));
+    }
+
+    private function generateOver05FirstHalfOdds(float $homeStrength, float $awayStrength): float
+    {
+        // Over 0.5 first half es muy común (60-80% de los partidos)
+        $averageStrength = ($homeStrength + $awayStrength) / 2;
+        $over05FirstHalfProb = 0.62 + ($averageStrength * 0.18); // Base 62% + ajuste por fuerza
+        $over05FirstHalfProb = max(0.55, min(0.82, $over05FirstHalfProb));
+        
+        $odds = 1 / $over05FirstHalfProb * 1.06; // 6% margen (mercado popular)
+        return $this->roundOdds(max(1.2, min(2.2, $odds))); // Rango típico 1.2 - 2.2
     }
 
     private function roundOdds(float $odds): float
