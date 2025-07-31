@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Team;
 use App\Models\FootballMatch;
 use App\Models\TeamStatistic;
+use App\Services\ApiQuotaManager;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
@@ -28,25 +29,87 @@ class EnhancedFootballApiService
     private string $apiKey;
     private string $timezone;
     private array $headers;
+    private ApiQuotaManager $quotaManager;
 
-    // Rate limit recommendations (requests per minute)
+    // Updated rate limits for 7500 daily requests plan
     private const RATE_LIMITS = [
-        'free' => 10,      // Actually much less, but safe buffer
-        'basic' => 8,      // 10/min with buffer
-        'pro' => 80,       // 100/min with buffer
-        'ultra' => 240,    // 300/min with buffer
-        'mega' => 720,     // 900/min with buffer
+        'free' => 3,       // 100/day conservative
+        'basic' => 8,      // 1000/day, 10/min with buffer
+        'enhanced' => 250, // 7500/day, ~5/min sustained, 250/min burst
+        'pro' => 80,       // 10000/day, 100/min with buffer
+        'ultra' => 240,    // 100000/day, 300/min with buffer
+        'mega' => 720,     // 1000000/day, 900/min with buffer
     ];
 
-    public function __construct()
+    public function __construct(ApiQuotaManager $quotaManager = null)
     {
         $this->baseUrl = config('services.football_api.base_url');
         $this->apiKey = config('services.football_api.key');
         $this->timezone = config('services.football_api.timezone', 'Europe/Madrid');
+        $this->quotaManager = $quotaManager ?? app(ApiQuotaManager::class);
         $this->headers = [
             'x-apisports-key' => $this->apiKey,
             'Accept' => 'application/json',
         ];
+    }
+
+    // =========================================================================
+    // QUOTA-AWARE API REQUEST WRAPPER
+    // =========================================================================
+    
+    private function makeApiRequest(string $endpoint, array $params = [], string $requestType = 'general', int $priority = 3): ?array
+    {
+        // Check quota before making request
+        if (!$this->quotaManager->canMakeRequest($requestType, $priority)) {
+            Log::warning("API request blocked due to quota limits", [
+                'endpoint' => $endpoint,
+                'type' => $requestType,
+                'priority' => $priority
+            ]);
+            return null;
+        }
+
+        // Apply optimal delay
+        $delay = $this->quotaManager->getOptimalDelay();
+        if ($delay > 1) {
+            sleep($delay);
+        }
+
+        try {
+            $response = Http::withHeaders($this->headers)
+                ->timeout(10)
+                ->get("{$this->baseUrl}/{$endpoint}", $params);
+
+            // Record the request
+            $this->quotaManager->recordRequest($requestType);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                Log::info("API request successful", [
+                    'endpoint' => $endpoint,
+                    'type' => $requestType,
+                    'response_count' => count($data['response'] ?? [])
+                ]);
+
+                return $data['response'] ?? [];
+            }
+
+            Log::error('API request failed', [
+                'endpoint' => $endpoint,
+                'status' => $response->status(),
+                'response' => $response->body()
+            ]);
+
+            return [];
+
+        } catch (\Exception $e) {
+            Log::error('API request exception', [
+                'endpoint' => $endpoint,
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
     }
 
     // =========================================================================
@@ -57,24 +120,7 @@ class EnhancedFootballApiService
     public function fetchTimezones(): array
     {
         return Cache::remember('api_timezones', now()->addDays(30), function () {
-            try {
-                $response = Http::withHeaders($this->headers)
-                    ->get("{$this->baseUrl}/timezone");
-
-                if ($response->successful()) {
-                    return $response->json()['response'] ?? [];
-                }
-
-                Log::error('Failed to fetch timezones', [
-                    'status' => $response->status(),
-                    'response' => $response->body()
-                ]);
-
-                return [];
-            } catch (\Exception $e) {
-                Log::error('Exception fetching timezones: ' . $e->getMessage());
-                return [];
-            }
+            return $this->makeApiRequest('timezone', [], 'timezone', 5) ?? [];
         });
     }
 

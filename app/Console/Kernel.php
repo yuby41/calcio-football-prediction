@@ -32,24 +32,63 @@ class Kernel extends ConsoleKernel
                  ->everyTwoHours()
                  ->withoutOverlapping();
 
-        // Update live scores every 5 minutes (faster for live matches)
-        $schedule->command('football:update-today --silent')
-                 ->everyFiveMinutes()
+        // ==========================================
+        // 🚀 OPTIMIZED API USAGE (7500 daily requests)
+        // ==========================================
+        
+        // LIVE MATCHES: Ultra-frequent updates (every 2 minutes during match hours)
+        $schedule->command('football:sync-fixtures-optimized --type=live --with-events --with-stats')
+                 ->everyTwoMinutes()
+                 ->between('08:00', '23:00') // European match hours
                  ->withoutOverlapping();
 
-        // Generate predictions for new matches every hour
+        // TODAY'S MATCHES: Frequent updates (every 10 minutes)
+        $schedule->command('football:sync-fixtures-optimized --type=today --with-stats')
+                 ->everyTenMinutes()
+                 ->withoutOverlapping();
+
+        // WEEKLY MATCHES: Regular updates (every 30 minutes)
+        $schedule->command('football:sync-fixtures-optimized --type=week --leagues=PL,PD,BL1,SA,FL1')
+                 ->everyThirtyMinutes()
+                 ->withoutOverlapping();
+
+        // SEASON DATA: Comprehensive sync (every 2 hours)
+        $schedule->command('football:sync-fixtures-optimized --type=season --leagues=PL,PD,BL1,SA,FL1,CL,EL')
+                 ->everyTwoHours()
+                 ->withoutOverlapping();
+
+        // TEAM STANDINGS & STATS: Enhanced frequency (every 30 minutes)
+        $schedule->command('football:sync-standings --leagues=PL,PD,BL1,SA,FL1,CL,EL --with-stats')
+                 ->everyThirtyMinutes()
+                 ->withoutOverlapping();
+
+        // TEAMS & LEAGUES: Daily comprehensive sync
+        $schedule->command('football:sync-leagues-teams --leagues=PL,PD,BL1,SA,FL1,CL,EL --season=2025')
+                 ->dailyAt('03:00')
+                 ->withoutOverlapping();
+
+        // Generate predictions for new matches every 30 minutes
         $schedule->command('ml:predict')
-                 ->hourly()
+                 ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
-        // Update team statistics daily at 2 AM
+        // Update team statistics every 2 hours
         $schedule->command('team:generate-statistics')
-                 ->dailyAt('02:00')
+                 ->everyTwoHours()
                  ->withoutOverlapping();
 
-        // Refresh active prediction types daily at 5 AM
+        // Refresh active prediction types every 4 hours
         $schedule->command('predictions:refresh-active')
-                 ->dailyAt('05:00')
+                 ->everyFourHours()
+                 ->withoutOverlapping();
+
+        // ==========================================
+        // 📊 API MONITORING & OPTIMIZATION
+        // ==========================================
+        
+        // Monitor API usage every hour
+        $schedule->command('api:monitor --detailed')
+                 ->hourly()
                  ->withoutOverlapping();
 
         // Clean old logs weekly
