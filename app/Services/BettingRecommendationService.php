@@ -115,7 +115,7 @@ class BettingRecommendationService
             ],
             'both_teams_score' => [
                 'probability' => $prediction->both_teams_score_probability,
-                'label' => 'Ambos Marcan',
+                'label' => 'Ambos Marcan (Gol)',
                 'description' => 'Los dos equipos marcan gol',
                 'prediction_type' => 'both_teams_score_yes'
             ],

@@ -88,17 +88,7 @@ class StatisticsService
         $monthlyStats = $this->calculateCustomMonthlyStats($bothTeamsScoreResults, 'both_teams_score');
         $leagueStats = $this->calculateCustomLeagueStats($bothTeamsScoreResults, 'both_teams_score');
 
-        PredictionStatistic::updateOrCreate(
-            ['prediction_type' => 'both_teams_score'],
-            [
-                'total_predictions' => $totalPredictions,
-                'correct_predictions' => $correctPredictions,
-                'accuracy_percentage' => round($accuracy, 2),
-                'monthly_stats' => $monthlyStats,
-                'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
-            ]
-        );
+        // Removed both_teams_score duplicate - only using both_teams_score_yes
     }
 
     public function updateOverUnderStatistics(): void
@@ -142,17 +132,7 @@ class StatisticsService
         $monthlyStats = $this->calculateCustomMonthlyStats($overUnderResults, 'over_under_2_5');
         $leagueStats = $this->calculateCustomLeagueStats($overUnderResults, 'over_under_2_5');
 
-        PredictionStatistic::updateOrCreate(
-            ['prediction_type' => 'over_under_2_5'],
-            [
-                'total_predictions' => $totalPredictions,
-                'correct_predictions' => $correctPredictions,
-                'accuracy_percentage' => round($accuracy, 2),
-                'monthly_stats' => $monthlyStats,
-                'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
-            ]
-        );
+        // Removed over_under_2_5 duplicate - only using over_2_5 and under_2_5
     }
 
     private function getFinishedMatchesWithPredictions()
@@ -476,13 +456,7 @@ class StatisticsService
                 $match->prediction->first_half_over_0_5_correct = $actualOver05 === $predictedOver05;
             }
             
-            // Over 1.5 first half (if exists)
-            if (!is_null($match->prediction->first_half_over_1_5_probability) && 
-                is_null($match->prediction->first_half_over_1_5_correct)) {
-                $predictedOver15 = $match->prediction->first_half_over_1_5_probability > 0.5;
-                $actualOver15 = $firstHalfGoals > 1.5;
-                $match->prediction->first_half_over_1_5_correct = $actualOver15 === $predictedOver15;
-            }
+            // Over 1.5 first half removed as requested
             
             $match->prediction->save();
         }
@@ -490,8 +464,7 @@ class StatisticsService
         // Create Over 0.5 First Half statistics
         $this->createFirstHalfOver05Statistics($finishedMatches);
         
-        // Create Over 1.5 First Half statistics (if any predictions exist)
-        $this->createFirstHalfOver15Statistics($finishedMatches);
+        // Over 1.5 First Half statistics removed as requested
     }
 
     private function createFirstHalfOver05Statistics($finishedMatches): void
@@ -528,39 +501,7 @@ class StatisticsService
         );
     }
 
-    private function createFirstHalfOver15Statistics($finishedMatches): void
-    {
-        $over15Results = [];
-        foreach ($finishedMatches as $match) {
-            if (!is_null($match->prediction->first_half_over_1_5_correct)) {
-                $over15Results[] = [
-                    'correct' => $match->prediction->first_half_over_1_5_correct,
-                    'match' => $match
-                ];
-            }
-        }
-
-        $totalPredictions = count($over15Results);
-        $correctPredictions = array_filter($over15Results, function($result) {
-            return $result['correct'];
-        });
-        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
-
-        $monthlyStats = $this->calculateCustomMonthlyStats($over15Results, 'first_half_over_1_5');
-        $leagueStats = $this->calculateCustomLeagueStats($over15Results, 'first_half_over_1_5');
-
-        PredictionStatistic::updateOrCreate(
-            ['prediction_type' => 'first_half_over_1_5'],
-            [
-                'total_predictions' => $totalPredictions,
-                'correct_predictions' => count($correctPredictions),
-                'accuracy_percentage' => round($accuracy, 2),
-                'monthly_stats' => $monthlyStats,
-                'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
-            ]
-        );
-    }
+    // createFirstHalfOver15Statistics method removed as requested
 
     private function simulateFirstHalfGoals(int $totalGoals, int $matchId): int
     {

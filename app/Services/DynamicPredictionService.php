@@ -100,8 +100,8 @@ class DynamicPredictionService
         $activeTypes = $this->getActivePredictionTypes();
         $betTypeMappings = [
             'match_outcome' => ['home_win', 'away_win', 'draw'],
-            'both_teams_score_yes' => ['both_teams_score'],
-            'both_teams_score_no' => ['both_teams_score'], // Will be handled with inverted logic
+            'both_teams_score_yes' => ['both_teams_score'], // "Gol" prediction type
+            // Note: both_teams_score_no is handled separately, not duplicated
             'over_2_5' => ['over_2_5'],
             'under_2_5' => ['under_2_5'],
             'first_half_over_0_5' => ['over_0_5_first_half']
