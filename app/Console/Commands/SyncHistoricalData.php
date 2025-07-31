@@ -31,6 +31,7 @@ class SyncHistoricalData extends Command
         'BL1' => 78,   // Bundesliga
         'SA' => 135,   // Serie A
         'FL1' => 61,   // Ligue 1
+        'PPL' => 94,   // Primeira Liga (Liga Portugal)
         'CL' => 2,     // Champions League
         'EL' => 3,     // Europa League
     ];
