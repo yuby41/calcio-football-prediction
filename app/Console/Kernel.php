@@ -47,9 +47,44 @@ class Kernel extends ConsoleKernel
                  ->dailyAt('02:00')
                  ->withoutOverlapping();
 
+        // Refresh active prediction types daily at 5 AM
+        $schedule->command('predictions:refresh-active')
+                 ->dailyAt('05:00')
+                 ->withoutOverlapping();
+
         // Clean old logs weekly
         $schedule->command('logs:clean --days=7')
                  ->weekly()
+                 ->withoutOverlapping();
+
+        // ==========================================
+        // 🤖 AUTOMATED ML TRAINING & MONITORING
+        // ==========================================
+        
+        // Automated ML model retraining weekly (Sundays at 3 AM)
+        $schedule->command('ml:train-automated --precision-threshold=75')
+                 ->weekly()
+                 ->sundays()
+                 ->at('03:00')
+                 ->withoutOverlapping()
+                 ->emailOutputOnFailure(config('mail.admin_email', 'admin@example.com'));
+
+        // Model performance monitoring daily (4 AM)
+        $schedule->command('ml:check-model-performance --alert-threshold=70 --trigger-retrain')
+                 ->daily()
+                 ->at('04:00')
+                 ->withoutOverlapping();
+
+        // Data integrity verification every 6 hours with auto-fix
+        $schedule->command('data:verify-integrity --fix --silent')
+                 ->everySixHours()
+                 ->withoutOverlapping();
+
+        // Comprehensive team statistics recalculation weekly (Saturdays at 1 AM)
+        $schedule->command('teams:calculate-statistics --force')
+                 ->weekly()
+                 ->saturdays()
+                 ->at('01:00')
                  ->withoutOverlapping();
     }
 

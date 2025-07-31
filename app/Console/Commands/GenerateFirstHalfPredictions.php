@@ -34,7 +34,6 @@ class GenerateFirstHalfPredictions extends Command
         $this->info("Processing " . count($matches) . " matches...");
 
         $firstHalfOver05Stats = ['total' => 0, 'correct' => 0];
-        $firstHalfOver15Stats = ['total' => 0, 'correct' => 0];
 
         foreach ($matches as $match) {
             // Simulate first half goals (roughly 60% of total goals happen in first half)
@@ -43,19 +42,15 @@ class GenerateFirstHalfPredictions extends Command
             
             // Generate realistic probabilities based on total goals
             $over05Probability = $this->generateOver05Probability($totalGoals);
-            $over15Probability = $this->generateOver15Probability($totalGoals);
             
             // Determine actual outcomes
             $actualOver05 = $firstHalfGoals > 0.5;
-            $actualOver15 = $firstHalfGoals > 1.5;
             
             // Determine predicted outcomes
             $predictedOver05 = $over05Probability > 0.5;
-            $predictedOver15 = $over15Probability > 0.5;
             
             // Check correctness
             $over05Correct = $actualOver05 === $predictedOver05;
-            $over15Correct = $actualOver15 === $predictedOver15;
             
             // Update statistics
             $firstHalfOver05Stats['total']++;
@@ -63,25 +58,16 @@ class GenerateFirstHalfPredictions extends Command
                 $firstHalfOver05Stats['correct']++;
             }
             
-            $firstHalfOver15Stats['total']++;
-            if ($over15Correct) {
-                $firstHalfOver15Stats['correct']++;
-            }
-            
             // Update the prediction record
             DB::update("
                 UPDATE match_predictions 
                 SET 
                     first_half_over_0_5_probability = ?,
-                    first_half_over_1_5_probability = ?,
-                    first_half_over_0_5_correct = ?,
-                    first_half_over_1_5_correct = ?
+                    first_half_over_0_5_correct = ?
                 WHERE id = ?
             ", [
                 $over05Probability,
-                $over15Probability,
                 $over05Correct ? 1 : 0,
-                $over15Correct ? 1 : 0,
                 $match->prediction_id
             ]);
         }
@@ -89,10 +75,6 @@ class GenerateFirstHalfPredictions extends Command
         // Calculate accuracies
         $over05Accuracy = $firstHalfOver05Stats['total'] > 0 
             ? round(($firstHalfOver05Stats['correct'] / $firstHalfOver05Stats['total']) * 100, 2) 
-            : 0;
-
-        $over15Accuracy = $firstHalfOver15Stats['total'] > 0 
-            ? round(($firstHalfOver15Stats['correct'] / $firstHalfOver15Stats['total']) * 100, 2) 
             : 0;
 
         // Create First Half Over 0.5 statistics
@@ -110,23 +92,8 @@ class GenerateFirstHalfPredictions extends Command
             ]
         );
 
-        // Create First Half Over 1.5 statistics
-        DB::table('prediction_statistics')->updateOrInsert(
-            ['prediction_type' => 'first_half_over_1_5'],
-            [
-                'total_predictions' => $firstHalfOver15Stats['total'],
-                'correct_predictions' => $firstHalfOver15Stats['correct'],
-                'accuracy_percentage' => $over15Accuracy,
-                'monthly_stats' => json_encode([]),
-                'league_stats' => json_encode([]),
-                'last_updated' => now(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]
-        );
 
         $this->info("✅ Over 0.5 Goles (1T): {$firstHalfOver05Stats['correct']}/{$firstHalfOver05Stats['total']} ({$over05Accuracy}%)");
-        $this->info("✅ Over 1.5 Goles (1T): {$firstHalfOver15Stats['correct']}/{$firstHalfOver15Stats['total']} ({$over15Accuracy}%)");
         
         $this->info('🎯 First half predictions and statistics generated successfully!');
         
@@ -158,18 +125,4 @@ class GenerateFirstHalfPredictions extends Command
         return max(0.1, min(0.95, $baseProbability + (rand(-10, 10) / 100)));
     }
 
-    private function generateOver15Probability(int $totalGoals): float
-    {
-        // Lower probability for over 1.5 in first half
-        $baseProbability = match($totalGoals) {
-            0 => 0.15,
-            1 => 0.25,
-            2 => 0.45,
-            3 => 0.60,
-            default => 0.70
-        };
-        
-        // Add some randomness
-        return max(0.05, min(0.90, $baseProbability + (rand(-15, 15) / 100)));
-    }
 }

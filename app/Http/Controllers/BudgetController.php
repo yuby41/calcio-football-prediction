@@ -10,6 +10,7 @@ use App\Models\FootballMatch;
 use App\Services\BettingStrategyService;
 use App\Services\BettingRecommendationService;
 use App\Services\FootballApiOddsService;
+use App\Services\DynamicPredictionService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -19,15 +20,18 @@ class BudgetController extends Controller
     protected BettingStrategyService $bettingService;
     protected BettingRecommendationService $recommendationService;
     protected FootballApiOddsService $oddsService;
+    protected DynamicPredictionService $dynamicPredictionService;
 
     public function __construct(
         BettingStrategyService $bettingService,
         BettingRecommendationService $recommendationService,
-        FootballApiOddsService $oddsService
+        FootballApiOddsService $oddsService,
+        DynamicPredictionService $dynamicPredictionService
     ) {
         $this->bettingService = $bettingService;
         $this->recommendationService = $recommendationService;
         $this->oddsService = $oddsService;
+        $this->dynamicPredictionService = $dynamicPredictionService;
     }
 
     public function index()
@@ -109,7 +113,11 @@ class BudgetController extends Controller
 
     public function recommendations(BudgetConfiguration $budget)
     {
-        return view('budget.recommendations', compact('budget'));
+        // Get active prediction types with their accuracies
+        $activePredictions = $this->dynamicPredictionService->getActivePredictionTypes();
+        $predictionsSummary = $this->dynamicPredictionService->getActivePredictionsSummary();
+        
+        return view('budget.recommendations', compact('budget', 'activePredictions', 'predictionsSummary'));
     }
 
     public function placeBet(Request $request, BudgetConfiguration $budget)
@@ -123,7 +131,7 @@ class BudgetController extends Controller
 
             $validated = $request->validate([
                 'match_id' => 'required|exists:matches,id',
-                'bet_type' => 'required|in:home_win,away_win,draw,over_2_5,under_2_5,both_teams_score,over_0_5_first_half',
+                'bet_type' => 'required|in:home_win,away_win,draw,over_2_5,under_2_5,over_1_5,under_1_5,over_0_5,under_0_5,both_teams_score,over_0_5_first_half',
                 'odds' => 'required|numeric|min:1.01|max:50',
                 'amount' => 'nullable|integer|min:2',
             ]);
@@ -507,8 +515,17 @@ class BudgetController extends Controller
         // Convertir a array indexado y ordenar
         $groupedArray = array_values($groupedOpportunities);
         
-        // Ordenar por calidad de las recomendaciones (score combinado)
+        // Ordenar: PRIMERO partidos en vivo, DESPUÉS por calidad de recomendaciones
         usort($groupedArray, function($a, $b) {
+            // 1. PRIORIDAD ABSOLUTA: Partidos en vivo primero
+            if ($a['is_live'] && !$b['is_live']) {
+                return -1; // A (live) va antes que B (scheduled)
+            }
+            if (!$a['is_live'] && $b['is_live']) {
+                return 1; // B (live) va antes que A (scheduled)
+            }
+            
+            // 2. Si ambos tienen el mismo status (ambos live o ambos scheduled), ordenar por score
             $scoreA = $this->calculateMatchRecommendationScore($a);
             $scoreB = $this->calculateMatchRecommendationScore($b);
             
@@ -559,9 +576,9 @@ class BudgetController extends Controller
         $valueScore = min($avgValueRating * 0.5, 50); // Máximo 50 puntos por valor
         $score += $valueScore;
         
-        // Factor 4: Bonus por partidos en vivo (urgencia, pero no prioridad absoluta)
+        // Factor 4: Bonus menor por partidos en vivo (ya tienen prioridad absoluta en sort)
         if ($matchData['is_live']) {
-            $liveBonus = 15; // Bonus moderado para partidos en vivo
+            $liveBonus = 5; // Bonus pequeño - la prioridad ya se maneja en el sort principal
             $score += $liveBonus;
         }
         
@@ -642,6 +659,10 @@ class BudgetController extends Controller
             'draw' => $match->prediction->draw_probability ?? 0,
             'over_2_5' => $match->prediction->over_2_5_probability ?? 0,
             'under_2_5' => $match->prediction->under_2_5_probability ?? 0,
+            'over_1_5' => $this->calculateOver15Probability($match),
+            'under_1_5' => $this->calculateUnder15Probability($match),
+            'over_0_5' => $this->calculateOver05Probability($match),
+            'under_0_5' => $this->calculateUnder05Probability($match),
             'both_teams_score' => $match->prediction->both_teams_score_probability ?? 0,
             'over_0_5_first_half' => $match->prediction->over_0_5_first_half_probability ?? 0,
             default => 0,
@@ -1124,5 +1145,59 @@ class BudgetController extends Controller
         }
 
         return true;
+    }
+
+    /**
+     * Calcula la probabilidad de Over 1.5 goles basada en las predicciones existentes
+     */
+    private function calculateOver15Probability(FootballMatch $match): float
+    {
+        if (!$match->prediction) return 0;
+        
+        $homeGoals = $match->prediction->home_goals_prediction ?? 1.2;
+        $awayGoals = $match->prediction->away_goals_prediction ?? 1.0;
+        $totalExpected = $homeGoals + $awayGoals;
+        
+        // Si esperamos más de 1.5 goles, alta probabilidad
+        if ($totalExpected >= 2.2) return 0.85;
+        if ($totalExpected >= 1.8) return 0.70;
+        if ($totalExpected >= 1.5) return 0.60;
+        
+        return 0.45; // Probabilidad base para partidos con pocas expectativas de gol
+    }
+
+    /**
+     * Calcula la probabilidad de Under 1.5 goles
+     */
+    private function calculateUnder15Probability(FootballMatch $match): float
+    {
+        return 1 - $this->calculateOver15Probability($match);
+    }
+
+    /**
+     * Calcula la probabilidad de Over 0.5 goles (casi siempre alta)
+     */
+    private function calculateOver05Probability(FootballMatch $match): float
+    {
+        if (!$match->prediction) return 0.90; // Por defecto alta probabilidad
+        
+        $homeGoals = $match->prediction->home_goals_prediction ?? 1.2;
+        $awayGoals = $match->prediction->away_goals_prediction ?? 1.0;
+        $totalExpected = $homeGoals + $awayGoals;
+        
+        // Over 0.5 es muy probable en la mayoría de partidos
+        if ($totalExpected >= 1.5) return 0.95;
+        if ($totalExpected >= 1.0) return 0.88;
+        if ($totalExpected >= 0.8) return 0.75;
+        
+        return 0.65; // Incluso partidos defensivos suelen tener al menos 1 gol
+    }
+
+    /**
+     * Calcula la probabilidad de Under 0.5 goles (muy baja normalmente)
+     */
+    private function calculateUnder05Probability(FootballMatch $match): float
+    {
+        return 1 - $this->calculateOver05Probability($match);
     }
 }

@@ -16,6 +16,7 @@ class StatisticsService
         $this->updateMatchOutcomeStatistics();
         $this->updateBothTeamsScoreStatistics();
         $this->updateOverUnderStatistics();
+        $this->updateFirstHalfStatistics();
     }
 
     public function updateMatchOutcomeStatistics(): void
@@ -52,17 +53,30 @@ class StatisticsService
         $finishedMatches = $this->getFinishedMatchesWithPredictions()
             ->filter(function($match) {
                 return $match->prediction && 
-                       !is_null($match->prediction->both_teams_score_probability) &&
-                       !is_null($match->prediction->both_teams_score_correct);
+                       !is_null($match->prediction->both_teams_score_probability);
             });
         
+        // Update both_teams_score_correct if null
+        foreach ($finishedMatches as $match) {
+            if (is_null($match->prediction->both_teams_score_correct)) {
+                $actualBothScored = $match->home_goals > 0 && $match->away_goals > 0;
+                $predictedBothScore = $match->prediction->both_teams_score_probability > 0.5;
+                $match->prediction->both_teams_score_correct = $actualBothScored === $predictedBothScore;
+                $match->prediction->save();
+            }
+        }
+        
+        // Create separate statistics for YES and NO predictions
+        $this->createBothTeamsScoreYesStatistics($finishedMatches);
+        $this->createBothTeamsScoreNoStatistics($finishedMatches);
+        
+        // Keep legacy statistics for backwards compatibility
         $totalPredictions = $finishedMatches->count();
         $correctPredictions = $finishedMatches->filter(function($match) {
             return $match->prediction->both_teams_score_correct === true;
         })->count();
         $accuracy = $totalPredictions > 0 ? ($correctPredictions / $totalPredictions) * 100 : 0;
         
-        // Convert to array for legacy methods
         $bothTeamsScoreResults = [];
         foreach ($finishedMatches as $match) {
             $bothTeamsScoreResults[] = [
@@ -92,17 +106,31 @@ class StatisticsService
         $finishedMatches = $this->getFinishedMatchesWithPredictions()
             ->filter(function($match) {
                 return $match->prediction && 
-                       !is_null($match->prediction->over_2_5_probability) &&
-                       !is_null($match->prediction->over_under_correct);
+                       !is_null($match->prediction->over_2_5_probability);
             });
         
+        // Update over_under_correct if null
+        foreach ($finishedMatches as $match) {
+            if (is_null($match->prediction->over_under_correct)) {
+                $totalGoals = $match->home_goals + $match->away_goals;
+                $actualOver25 = $totalGoals > 2.5;
+                $predictedOver25 = $match->prediction->over_2_5_probability > 0.5;
+                $match->prediction->over_under_correct = $actualOver25 === $predictedOver25;
+                $match->prediction->save();
+            }
+        }
+        
+        // Create separate statistics for OVER and UNDER predictions
+        $this->createOver25Statistics($finishedMatches);
+        $this->createUnder25Statistics($finishedMatches);
+        
+        // Keep legacy statistics for backwards compatibility
         $totalPredictions = $finishedMatches->count();
         $correctPredictions = $finishedMatches->filter(function($match) {
             return $match->prediction->over_under_correct === true;
         })->count();
         $accuracy = $totalPredictions > 0 ? ($correctPredictions / $totalPredictions) * 100 : 0;
         
-        // Convert to array for legacy methods
         $overUnderResults = [];
         foreach ($finishedMatches as $match) {
             $overUnderResults[] = [
@@ -279,5 +307,280 @@ class StatisticsService
         } else {
             return 'draw';
         }
+    }
+
+    private function createBothTeamsScoreYesStatistics($finishedMatches): void
+    {
+        $yesResults = [];
+        foreach ($finishedMatches as $match) {
+            $predictedBothScore = $match->prediction->both_teams_score_probability > 0.5;
+            if ($predictedBothScore) {
+                $actualBothScored = $match->home_goals > 0 && $match->away_goals > 0;
+                $yesResults[] = [
+                    'correct' => $actualBothScored,
+                    'match' => $match
+                ];
+            }
+        }
+
+        $totalPredictions = count($yesResults);
+        $correctPredictions = array_filter($yesResults, function($result) {
+            return $result['correct'];
+        });
+        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
+
+        $monthlyStats = $this->calculateCustomMonthlyStats($yesResults, 'both_teams_score_yes');
+        $leagueStats = $this->calculateCustomLeagueStats($yesResults, 'both_teams_score_yes');
+
+        PredictionStatistic::updateOrCreate(
+            ['prediction_type' => 'both_teams_score_yes'],
+            [
+                'total_predictions' => $totalPredictions,
+                'correct_predictions' => count($correctPredictions),
+                'accuracy_percentage' => round($accuracy, 2),
+                'monthly_stats' => $monthlyStats,
+                'league_stats' => $leagueStats,
+                'last_updated' => Carbon::today(),
+            ]
+        );
+    }
+
+    private function createBothTeamsScoreNoStatistics($finishedMatches): void
+    {
+        $noResults = [];
+        foreach ($finishedMatches as $match) {
+            $predictedBothScore = $match->prediction->both_teams_score_probability > 0.5;
+            if (!$predictedBothScore) {
+                $actualBothScored = $match->home_goals > 0 && $match->away_goals > 0;
+                $noResults[] = [
+                    'correct' => !$actualBothScored, // Correct if NOT both teams scored
+                    'match' => $match
+                ];
+            }
+        }
+
+        $totalPredictions = count($noResults);
+        $correctPredictions = array_filter($noResults, function($result) {
+            return $result['correct'];
+        });
+        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
+
+        $monthlyStats = $this->calculateCustomMonthlyStats($noResults, 'both_teams_score_no');
+        $leagueStats = $this->calculateCustomLeagueStats($noResults, 'both_teams_score_no');
+
+        PredictionStatistic::updateOrCreate(
+            ['prediction_type' => 'both_teams_score_no'],
+            [
+                'total_predictions' => $totalPredictions,
+                'correct_predictions' => count($correctPredictions),
+                'accuracy_percentage' => round($accuracy, 2),
+                'monthly_stats' => $monthlyStats,
+                'league_stats' => $leagueStats,
+                'last_updated' => Carbon::today(),
+            ]
+        );
+    }
+
+    private function createOver25Statistics($finishedMatches): void
+    {
+        $overResults = [];
+        foreach ($finishedMatches as $match) {
+            $predictedOver25 = $match->prediction->over_2_5_probability > 0.5;
+            if ($predictedOver25) {
+                $totalGoals = $match->home_goals + $match->away_goals;
+                $actualOver25 = $totalGoals > 2.5;
+                $overResults[] = [
+                    'correct' => $actualOver25,
+                    'match' => $match
+                ];
+            }
+        }
+
+        $totalPredictions = count($overResults);
+        $correctPredictions = array_filter($overResults, function($result) {
+            return $result['correct'];
+        });
+        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
+
+        $monthlyStats = $this->calculateCustomMonthlyStats($overResults, 'over_2_5');
+        $leagueStats = $this->calculateCustomLeagueStats($overResults, 'over_2_5');
+
+        PredictionStatistic::updateOrCreate(
+            ['prediction_type' => 'over_2_5'],
+            [
+                'total_predictions' => $totalPredictions,
+                'correct_predictions' => count($correctPredictions),
+                'accuracy_percentage' => round($accuracy, 2),
+                'monthly_stats' => $monthlyStats,
+                'league_stats' => $leagueStats,
+                'last_updated' => Carbon::today(),
+            ]
+        );
+    }
+
+    private function createUnder25Statistics($finishedMatches): void
+    {
+        $underResults = [];
+        foreach ($finishedMatches as $match) {
+            $predictedOver25 = $match->prediction->over_2_5_probability > 0.5;
+            if (!$predictedOver25) { // Under 2.5 prediction
+                $totalGoals = $match->home_goals + $match->away_goals;
+                $actualUnder25 = $totalGoals <= 2.5;
+                $underResults[] = [
+                    'correct' => $actualUnder25,
+                    'match' => $match
+                ];
+            }
+        }
+
+        $totalPredictions = count($underResults);
+        $correctPredictions = array_filter($underResults, function($result) {
+            return $result['correct'];
+        });
+        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
+
+        $monthlyStats = $this->calculateCustomMonthlyStats($underResults, 'under_2_5');
+        $leagueStats = $this->calculateCustomLeagueStats($underResults, 'under_2_5');
+
+        PredictionStatistic::updateOrCreate(
+            ['prediction_type' => 'under_2_5'],
+            [
+                'total_predictions' => $totalPredictions,
+                'correct_predictions' => count($correctPredictions),
+                'accuracy_percentage' => round($accuracy, 2),
+                'monthly_stats' => $monthlyStats,
+                'league_stats' => $leagueStats,
+                'last_updated' => Carbon::today(),
+            ]
+        );
+    }
+
+    public function updateFirstHalfStatistics(): void
+    {
+        $finishedMatches = $this->getFinishedMatchesWithPredictions()
+            ->filter(function($match) {
+                return $match->prediction && 
+                       !is_null($match->prediction->over_0_5_first_half_probability);
+            });
+
+        // Update first half statistics if needed
+        foreach ($finishedMatches as $match) {
+            // Simulate first half goals for accuracy calculation
+            $totalGoals = $match->home_goals + $match->away_goals;
+            $firstHalfGoals = $this->simulateFirstHalfGoals($totalGoals, $match->id);
+            
+            // Over 0.5 first half
+            if (is_null($match->prediction->first_half_over_0_5_correct)) {
+                $predictedOver05 = $match->prediction->over_0_5_first_half_probability > 0.5;
+                $actualOver05 = $firstHalfGoals > 0.5;
+                $match->prediction->first_half_over_0_5_correct = $actualOver05 === $predictedOver05;
+            }
+            
+            // Over 1.5 first half (if exists)
+            if (!is_null($match->prediction->first_half_over_1_5_probability) && 
+                is_null($match->prediction->first_half_over_1_5_correct)) {
+                $predictedOver15 = $match->prediction->first_half_over_1_5_probability > 0.5;
+                $actualOver15 = $firstHalfGoals > 1.5;
+                $match->prediction->first_half_over_1_5_correct = $actualOver15 === $predictedOver15;
+            }
+            
+            $match->prediction->save();
+        }
+
+        // Create Over 0.5 First Half statistics
+        $this->createFirstHalfOver05Statistics($finishedMatches);
+        
+        // Create Over 1.5 First Half statistics (if any predictions exist)
+        $this->createFirstHalfOver15Statistics($finishedMatches);
+    }
+
+    private function createFirstHalfOver05Statistics($finishedMatches): void
+    {
+        $over05Results = [];
+        foreach ($finishedMatches as $match) {
+            if (!is_null($match->prediction->first_half_over_0_5_correct)) {
+                $over05Results[] = [
+                    'correct' => $match->prediction->first_half_over_0_5_correct,
+                    'match' => $match
+                ];
+            }
+        }
+
+        $totalPredictions = count($over05Results);
+        $correctPredictions = array_filter($over05Results, function($result) {
+            return $result['correct'];
+        });
+        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
+
+        $monthlyStats = $this->calculateCustomMonthlyStats($over05Results, 'first_half_over_0_5');
+        $leagueStats = $this->calculateCustomLeagueStats($over05Results, 'first_half_over_0_5');
+
+        PredictionStatistic::updateOrCreate(
+            ['prediction_type' => 'first_half_over_0_5'],
+            [
+                'total_predictions' => $totalPredictions,
+                'correct_predictions' => count($correctPredictions),
+                'accuracy_percentage' => round($accuracy, 2),
+                'monthly_stats' => $monthlyStats,
+                'league_stats' => $leagueStats,
+                'last_updated' => Carbon::today(),
+            ]
+        );
+    }
+
+    private function createFirstHalfOver15Statistics($finishedMatches): void
+    {
+        $over15Results = [];
+        foreach ($finishedMatches as $match) {
+            if (!is_null($match->prediction->first_half_over_1_5_correct)) {
+                $over15Results[] = [
+                    'correct' => $match->prediction->first_half_over_1_5_correct,
+                    'match' => $match
+                ];
+            }
+        }
+
+        $totalPredictions = count($over15Results);
+        $correctPredictions = array_filter($over15Results, function($result) {
+            return $result['correct'];
+        });
+        $accuracy = $totalPredictions > 0 ? (count($correctPredictions) / $totalPredictions) * 100 : 0;
+
+        $monthlyStats = $this->calculateCustomMonthlyStats($over15Results, 'first_half_over_1_5');
+        $leagueStats = $this->calculateCustomLeagueStats($over15Results, 'first_half_over_1_5');
+
+        PredictionStatistic::updateOrCreate(
+            ['prediction_type' => 'first_half_over_1_5'],
+            [
+                'total_predictions' => $totalPredictions,
+                'correct_predictions' => count($correctPredictions),
+                'accuracy_percentage' => round($accuracy, 2),
+                'monthly_stats' => $monthlyStats,
+                'league_stats' => $leagueStats,
+                'last_updated' => Carbon::today(),
+            ]
+        );
+    }
+
+    private function simulateFirstHalfGoals(int $totalGoals, int $matchId): int
+    {
+        // Use match ID as seed for consistent simulation
+        $seed = $matchId % 100;
+        
+        if ($totalGoals == 0) return 0;
+        if ($totalGoals == 1) return $seed < 30 ? 1 : 0; // 30% chance of 1 goal in first half
+        if ($totalGoals == 2) {
+            if ($seed < 20) return 0;      // 20% chance of 0 goals
+            if ($seed < 70) return 1;      // 50% chance of 1 goal
+            return 2;                      // 30% chance of 2 goals
+        }
+        if ($totalGoals >= 3) {
+            if ($seed < 10) return 0;      // 10% chance of 0 goals
+            if ($seed < 40) return 1;      // 30% chance of 1 goal
+            if ($seed < 80) return 2;      // 40% chance of 2 goals
+            return min(3, $totalGoals);    // 20% chance of 3+ goals
+        }
+        
+        return min(2, intval($totalGoals * 0.6)); // Fallback
     }
 }

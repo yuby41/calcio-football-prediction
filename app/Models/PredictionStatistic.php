@@ -34,7 +34,6 @@ class PredictionStatistic extends Model
         'over_2_5' => 'Over 2.5 Goles',
         'under_2_5' => 'Under 2.5 Goles',
         'first_half_over_0_5' => 'Over 0.5 Goles (1T)',
-        'first_half_over_1_5' => 'Over 1.5 Goles (1T)',
     ];
 
     public function getDisplayNameAttribute(): string

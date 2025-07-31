@@ -11,13 +11,16 @@ class BettingRecommendationService
 {
     private BettingStrategyService $strategyService;
     private FootballApiOddsService $oddsService;
+    private DynamicPredictionService $dynamicPredictionService;
 
     public function __construct(
         BettingStrategyService $strategyService,
-        FootballApiOddsService $oddsService
+        FootballApiOddsService $oddsService,
+        DynamicPredictionService $dynamicPredictionService
     ) {
         $this->strategyService = $strategyService;
         $this->oddsService = $oddsService;
+        $this->dynamicPredictionService = $dynamicPredictionService;
     }
 
     public function getRecommendationsForBudget(BudgetConfiguration $budget): array
@@ -87,39 +90,67 @@ class BettingRecommendationService
             return [];
         }
 
-        // Analizar cada tipo de apuesta
-        $betTypes = [
+        // Obtener solo los tipos de apuesta activos basados en estadísticas
+        $activeBetTypes = $this->dynamicPredictionService->getActiveBetTypes();
+        
+        // Crear mapa de tipos de apuesta disponibles
+        $allBetTypes = [
             'home_win' => [
                 'probability' => $prediction->home_win_probability,
                 'label' => 'Victoria Local',
-                'description' => $match->homeTeam->name . ' gana'
+                'description' => $match->homeTeam->name . ' gana',
+                'prediction_type' => 'match_outcome'
             ],
             'away_win' => [
                 'probability' => $prediction->away_win_probability,
                 'label' => 'Victoria Visitante',
-                'description' => $match->awayTeam->name . ' gana'
+                'description' => $match->awayTeam->name . ' gana',
+                'prediction_type' => 'match_outcome'
             ],
             'draw' => [
                 'probability' => $prediction->draw_probability,
                 'label' => 'Empate',
-                'description' => 'Resultado empate'
+                'description' => 'Resultado empate',
+                'prediction_type' => 'match_outcome'
             ],
             'both_teams_score' => [
                 'probability' => $prediction->both_teams_score_probability,
                 'label' => 'Ambos Marcan',
-                'description' => 'Los dos equipos marcan gol'
+                'description' => 'Los dos equipos marcan gol',
+                'prediction_type' => 'both_teams_score_yes'
             ],
             'over_2_5' => [
                 'probability' => $prediction->over_2_5_probability,
                 'label' => 'Más de 2.5 Goles',
-                'description' => 'Más de 2.5 goles en total'
+                'description' => 'Más de 2.5 goles en total',
+                'prediction_type' => 'over_2_5'
             ],
             'under_2_5' => [
                 'probability' => $prediction->under_2_5_probability,
                 'label' => 'Menos de 2.5 Goles',
-                'description' => 'Menos de 2.5 goles en total'
+                'description' => 'Menos de 2.5 goles en total',
+                'prediction_type' => 'under_2_5'
+            ],
+            'over_0_5_first_half' => [
+                'probability' => $prediction->over_0_5_first_half_probability,
+                'label' => 'Over 0.5 1T',
+                'description' => 'Más de 0.5 goles en el primer tiempo',
+                'prediction_type' => 'first_half_over_0_5'
             ],
         ];
+
+        // Filtrar solo los tipos de apuesta activos
+        $betTypes = [];
+        foreach ($activeBetTypes as $activeBet) {
+            $betType = $activeBet['bet_type'];
+            if (isset($allBetTypes[$betType])) {
+                $betInfo = $allBetTypes[$betType];
+                // Agregar información de precisión estadística
+                $betInfo['statistics_accuracy'] = $activeBet['accuracy'];
+                $betInfo['statistics_display_name'] = $activeBet['display_name'];
+                $betTypes[$betType] = $betInfo;
+            }
+        }
 
         foreach ($betTypes as $betType => $info) {
             if (!$info['probability']) continue;
@@ -127,16 +158,21 @@ class BettingRecommendationService
             // Solo analizar apuestas que tienen odds reales disponibles
             if (!isset($realOdds[$betType])) continue;
 
-            $confidence = $info['probability'] * 100;
+            // Calcular confianza combinada: predicción del partido + precisión estadística
+            $matchConfidence = $info['probability'] * 100;
+            $statisticsAccuracy = $info['statistics_accuracy'];
+            
+            // Confianza combinada: promedio ponderado (70% predicción, 30% estadísticas)
+            $combinedConfidence = ($matchConfidence * 0.7) + ($statisticsAccuracy * 0.3);
             
             // Solo recomendar si supera el mínimo de confianza
-            if ($confidence >= $budget->min_confidence) {
+            if ($combinedConfidence >= $budget->min_confidence) {
                 $oddsSource = $realOdds[$betType . '_source'] ?? $realOdds['source'] ?? 'bet365_fallback';
                 
                 $recommendation = $this->createRecommendationWithRealOdds(
                     $betType,
                     $info,
-                    $confidence,
+                    $combinedConfidence,
                     $realOdds[$betType],
                     $oddsSource,
                     $match,
@@ -564,6 +600,7 @@ class BettingRecommendationService
             'over_2_5' => 0.35,      // Goles extremadamente volátiles
             'under_2_5' => 0.35,
             'both_teams_score' => 0.25,
+            'over_0_5_first_half' => 0.45,  // Extremadamente volátil - se decide rápido
         ][$betType] ?? 0.20;
 
         // Ajustar por tiempo (menos tiempo restante = más volatilidad)
@@ -585,6 +622,20 @@ class BettingRecommendationService
             // Muchos goles = volatilidad para mercados de goles
             if (str_contains($betType, '2_5') && $totalGoals >= 2) {
                 $scoreAdjustment *= 1.3;
+            }
+            
+            // Over 0.5 1T: Ajuste especial según goles en primera mitad
+            if ($betType === 'over_0_5_first_half') {
+                if ($timeElapsed >= 45) {
+                    // Ya terminó primer tiempo - volatilidad mínima
+                    $scoreAdjustment = 0.1;
+                } elseif ($totalGoals > 0) {
+                    // Ya hay goles - volatilidad muy baja
+                    $scoreAdjustment = 0.2;
+                } else {
+                    // Sin goles aún - volatilidad máxima
+                    $scoreAdjustment = 2.0;
+                }
             }
         }
 

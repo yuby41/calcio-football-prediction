@@ -62,6 +62,67 @@
         </div>
     </div>
 
+    <!-- Active Prediction Types -->
+    @if(count($activePredictions) > 0)
+    <div class="bg-white shadow rounded-lg mb-6">
+        <div class="px-4 py-5 sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-medium text-gray-900">
+                    🎯 Tipos de Predicción Activos
+                </h3>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    {{ count($activePredictions) }} activos de {{ $predictionsSummary['total_count'] }} disponibles
+                </span>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">
+                Solo se muestran predicciones con >50% de precisión basadas en estadísticas históricas. 
+                Actualizado: {{ $predictionsSummary['last_updated']->format('d/m/Y H:i') }}
+            </p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                @foreach($activePredictions as $prediction)
+                <div class="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="font-medium text-gray-900">{{ $prediction['display_name'] }}</h4>
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium 
+                                     @if($prediction['accuracy'] >= 70) bg-green-100 text-green-800
+                                     @elseif($prediction['accuracy'] >= 60) bg-yellow-100 text-yellow-800
+                                     @else bg-blue-100 text-blue-800 @endif">
+                            {{ number_format($prediction['accuracy'], 1) }}%
+                        </span>
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        {{ $prediction['correct_predictions'] }}/{{ $prediction['total_predictions'] }} predicciones correctas
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                        <div class="bg-gradient-to-r from-blue-500 to-green-500 h-2 rounded-full transition-all duration-300" 
+                             style="width: {{ $prediction['accuracy'] }}%"></div>
+                    </div>
+                </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+    @else
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg mb-6">
+        <div class="px-4 py-5 sm:p-6">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <h3 class="text-sm font-medium text-yellow-800">Sin Predicciones Confiables</h3>
+                    <div class="mt-2 text-sm text-yellow-700">
+                        <p>Actualmente no hay tipos de predicción con precisión superior al 50%. Las recomendaciones pueden ser limitadas.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    @endif
+
     <!-- Recomendaciones -->
     <div id="recommendations-container">
         <div class="flex items-center justify-center py-12">
@@ -113,18 +174,54 @@ function renderRecommendations(recommendations) {
 
     let html = '';
     
-    recommendations.forEach((match, index) => {
-        html += renderMatchWithRecommendations(match, index);
-    });
+    // Separar partidos en vivo de programados
+    const liveMatches = recommendations.filter(match => match.is_live);
+    const scheduledMatches = recommendations.filter(match => !match.is_live);
+    
+    // Render partidos en vivo primero con encabezado especial
+    if (liveMatches.length > 0) {
+        html += `
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-red-600 flex items-center">
+                        <span class="animate-pulse mr-2">🔴</span>
+                        PARTIDOS EN VIVO (${liveMatches.length})
+                    </h2>
+                </div>
+            </div>
+        `;
+        liveMatches.forEach((match, index) => {
+            html += renderMatchWithRecommendations(match, index);
+        });
+    }
+    
+    // Render partidos programados con encabezado
+    if (scheduledMatches.length > 0) {
+        html += `
+            <div class="mb-6 ${liveMatches.length > 0 ? 'mt-8' : ''}">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-700 flex items-center">
+                        <span class="mr-2">📅</span>
+                        PARTIDOS PROGRAMADOS (${scheduledMatches.length})
+                    </h2>
+                </div>
+            </div>
+        `;
+        scheduledMatches.forEach((match, index) => {
+            html += renderMatchWithRecommendations(match, index + liveMatches.length);
+        });
+    }
     
     container.innerHTML = html;
 }
 
 function renderMatchWithRecommendations(matchData, index) {
     const liveIndicator = matchData.is_live ? '🔴 EN VIVO' : '';
+    const liveClasses = matchData.is_live ? 'border-l-4 border-red-500 bg-red-50' : 'bg-white';
+    const livePulse = matchData.is_live ? 'animate-pulse' : '';
     
     return `
-        <div class="bg-white shadow rounded-lg mb-6">
+        <div class="${liveClasses} shadow rounded-lg mb-6 ${livePulse}">
             <!-- Match Header -->
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex items-center justify-between">
@@ -143,9 +240,9 @@ function renderMatchWithRecommendations(matchData, index) {
                         </div>
                     </div>
                     <div class="text-right">
-                        <div class="text-sm font-medium text-gray-700">
+                        <div class="text-sm font-medium ${matchData.is_live ? 'text-red-700' : 'text-gray-700'}">
                             ${matchData.match_date}
-                            ${matchData.is_live ? `<span class="text-red-600 ml-2">${liveIndicator}</span>` : ''}
+                            ${matchData.is_live ? `<span class="text-red-600 ml-2 font-bold animate-pulse">${liveIndicator}</span>` : ''}
                         </div>
                         <div class="text-xs text-gray-500 mt-1">
                             <span class="font-medium">${matchData.league}</span>
@@ -185,14 +282,14 @@ function renderMatchWithRecommendations(matchData, index) {
                 </h3>
                 
                 <div class="space-y-4">
-                    ${matchData.recommendations.map(rec => renderSingleRecommendation(rec, matchData.match_id)).join('')}
+                    ${matchData.recommendations.map(rec => renderSingleRecommendation(rec, matchData.match_id, matchData.is_live)).join('')}
                 </div>
             </div>
         </div>
     `;
 }
 
-function renderSingleRecommendation(rec, matchId) {
+function renderSingleRecommendation(rec, matchId, isLive = false) {
     const levelColor = getRecommendationLevelColor(rec.analysis.recommendation_level);
     const riskColor = getRiskLevelColor(rec.analysis.risk_level);
     
@@ -251,9 +348,9 @@ function renderSingleRecommendation(rec, matchId) {
                         class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                     Apostar €${rec.recommended_amount}
                 </button>
-                <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.odds}, ${rec.confidence})"
+                <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.odds}, ${rec.confidence}, ${isLive})"
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
-                    Personalizar
+                    Personalizar ${isLive ? '🔴' : ''}
                 </button>
             </div>
         </div>
@@ -460,14 +557,14 @@ function renderMatchRecommendation(data, index) {
                 </h3>
                 
                 <div class="space-y-4">
-                    ${recommendations.map(rec => renderRecommendation(rec, match.id)).join('')}
+                    ${recommendations.map(rec => renderRecommendation(rec, match.id, data.is_live)).join('')}
                 </div>
             </div>
         </div>
     `;
 }
 
-function renderRecommendation(rec, matchId) {
+function renderRecommendation(rec, matchId, isLive = false) {
     const levelColors = {
         'EXCELENTE': 'green',
         'MUY BUENA': 'blue',
@@ -557,9 +654,9 @@ function renderRecommendation(rec, matchId) {
                         class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                     Apostar €${rec.recommended_amount}
                 </button>
-                <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.estimated_odds}, ${rec.confidence})"
+                <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.estimated_odds}, ${rec.confidence}, ${isLive})"
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
-                    Personalizar
+                    Personalizar ${isLive ? '🔴' : ''}
                 </button>
             </div>
         </div>
@@ -615,17 +712,20 @@ function placeBet(matchId, betType, odds, amount) {
     }
 }
 
-function customBet(matchId, betType, originalOdds, confidence) {
+function customBet(matchId, betType, originalOdds, confidence, isLive = false) {
     // Crear modal personalizado para la configuración
     const modalHtml = `
         <div id="customBetModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
             <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
                 <div class="mt-3">
-                    <h3 class="text-lg font-medium text-gray-900 mb-4">Personalizar Apuesta</h3>
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Personalizar Apuesta ${isLive ? '🔴 EN VIVO' : ''}</h3>
                     
                     <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de Apuesta:</label>
-                        <div class="text-sm text-gray-600 bg-gray-50 p-2 rounded">${getBetTypeDisplay(betType)}</div>
+                        <label for="customBetType" class="block text-sm font-medium text-gray-700 mb-1">Tipo de Apuesta:</label>
+                        <select id="customBetType" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="updateBetTypeSelection()">
+                            ${getBetTypeOptions(betType, isLive)}
+                        </select>
+                        <div class="text-xs text-gray-500 mt-1">${isLive ? 'Tipos disponibles para partidos en vivo' : 'Selecciona el tipo de apuesta'}</div>
                     </div>
                     
                     <div class="mb-4">
@@ -683,10 +783,64 @@ function getBetTypeDisplay(betType) {
         'draw': 'Empate',
         'over_2_5': 'Más de 2.5 Goles',
         'under_2_5': 'Menos de 2.5 Goles',
+        'over_1_5': 'Más de 1.5 Goles',
+        'under_1_5': 'Menos de 1.5 Goles',
+        'over_0_5': 'Más de 0.5 Goles',
+        'under_0_5': 'Menos de 0.5 Goles',
         'both_teams_score': 'Ambos Equipos Marcan',
         'over_0_5_first_half': 'Over 0.5 1T'
     };
     return types[betType] || betType;
+}
+
+function getBetTypeOptions(currentBetType, isLive = false) {
+    // Todas las opciones disponibles
+    const allOptions = [
+        { value: 'home_win', label: 'Victoria Local', group: 'resultado' },
+        { value: 'away_win', label: 'Victoria Visitante', group: 'resultado' },
+        { value: 'draw', label: 'Empate', group: 'resultado' },
+        { value: 'over_2_5', label: 'Más de 2.5 Goles', group: 'goles' },
+        { value: 'under_2_5', label: 'Menos de 2.5 Goles', group: 'goles' },
+        { value: 'over_1_5', label: 'Más de 1.5 Goles', group: 'goles' },
+        { value: 'under_1_5', label: 'Menos de 1.5 Goles', group: 'goles' },
+        { value: 'over_0_5', label: 'Más de 0.5 Goles', group: 'goles' },
+        { value: 'under_0_5', label: 'Menos de 0.5 Goles', group: 'goles' },
+        { value: 'both_teams_score', label: 'Ambos Equipos Marcan', group: 'especiales' },
+        { value: 'over_0_5_first_half', label: 'Over 0.5 1T', group: 'especiales' }
+    ];
+
+    // Filtrar opciones según si es partido en vivo
+    let availableOptions = allOptions;
+    
+    if (isLive) {
+        // Para partidos en vivo, ofrecer más opciones de goles alternativos
+        availableOptions = allOptions.filter(option => {
+            // Incluir todas las opciones para máxima flexibilidad en vivo
+            return true;
+        });
+    }
+
+    // Generar HTML de opciones agrupadas
+    let optionsHtml = '';
+    const groups = {
+        'resultado': 'Resultado del Partido',
+        'goles': 'Total de Goles',
+        'especiales': 'Apuestas Especiales'
+    };
+
+    Object.keys(groups).forEach(groupKey => {
+        const groupOptions = availableOptions.filter(option => option.group === groupKey);
+        if (groupOptions.length > 0) {
+            optionsHtml += `<optgroup label="${groups[groupKey]}">`;
+            groupOptions.forEach(option => {
+                const selected = option.value === currentBetType ? 'selected' : '';
+                optionsHtml += `<option value="${option.value}" ${selected}>${option.label}</option>`;
+            });
+            optionsHtml += `</optgroup>`;
+        }
+    });
+
+    return optionsHtml;
 }
 
 function getRecommendationLevelColor(level) {
@@ -831,7 +985,43 @@ function updatePotentialWin() {
     }
 }
 
-function confirmCustomBet(matchId, betType) {
+function updateBetTypeSelection() {
+    // Cuando cambia el tipo de apuesta, actualizar odds sugeridas
+    const selectedBetType = document.getElementById('customBetType').value;
+    const betTypeDisplay = getBetTypeDisplay(selectedBetType);
+    
+    // Actualizar odds base según el tipo de apuesta
+    const suggestedOdds = getSuggestedOddsForBetType(selectedBetType);
+    document.getElementById('customOdds').value = suggestedOdds;
+    
+    // Actualizar cantidad y ganancia potencial
+    updateCustomAmount();
+    
+    // Mostrar información del nuevo tipo de apuesta
+    console.log('Tipo de apuesta cambiado a:', betTypeDisplay);
+}
+
+function getSuggestedOddsForBetType(betType) {
+    // Odds típicas por tipo de apuesta para dar una referencia
+    const typicalOdds = {
+        'home_win': 2.20,
+        'away_win': 3.50,
+        'draw': 3.20,
+        'over_2_5': 1.80,
+        'under_2_5': 2.10,
+        'over_1_5': 1.30,
+        'under_1_5': 3.50,
+        'over_0_5': 1.10,
+        'under_0_5': 7.00,
+        'both_teams_score': 1.90,
+        'over_0_5_first_half': 1.25
+    };
+    
+    return typicalOdds[betType] || 2.00;
+}
+
+function confirmCustomBet(matchId, originalBetType) {
+    const selectedBetType = document.getElementById('customBetType').value;
     const odds = parseFloat(document.getElementById('customOdds').value);
     const amount = parseInt(document.getElementById('customAmount').value);
     
@@ -854,8 +1044,8 @@ function confirmCustomBet(matchId, betType) {
     // Cerrar modal
     closeCustomBetModal();
     
-    // Realizar apuesta con eliminación automática
-    placeBet(matchId, betType, odds, amount);
+    // Realizar apuesta con el tipo de apuesta seleccionado (no el original)
+    placeBet(matchId, selectedBetType, odds, amount);
 }
 
 function closeCustomBetModal() {

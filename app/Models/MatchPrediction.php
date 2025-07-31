@@ -21,6 +21,9 @@ class MatchPrediction extends Model
         'both_teams_score_probability',
         'over_2_5_probability',
         'under_2_5_probability',
+        'over_0_5_first_half_probability',
+        'home_goals_first_half_prediction',
+        'away_goals_first_half_prediction',
         'confidence_score',
         'model_version',
         'features_used',
@@ -28,6 +31,7 @@ class MatchPrediction extends Model
         'is_correct',
         'both_teams_score_correct',
         'over_under_correct',
+        'over_0_5_first_half_correct',
     ];
 
     protected $casts = [
@@ -39,12 +43,16 @@ class MatchPrediction extends Model
         'both_teams_score_probability' => 'decimal:4',
         'over_2_5_probability' => 'decimal:4',
         'under_2_5_probability' => 'decimal:4',
+        'over_0_5_first_half_probability' => 'decimal:4',
+        'home_goals_first_half_prediction' => 'decimal:2',
+        'away_goals_first_half_prediction' => 'decimal:2',
         'confidence_score' => 'decimal:4',
         'features_used' => 'array',
         'predicted_at' => 'datetime',
         'is_correct' => 'boolean',
         'both_teams_score_correct' => 'boolean',
         'over_under_correct' => 'boolean',
+        'over_0_5_first_half_correct' => 'boolean',
     ];
 
     public function match(): BelongsTo
@@ -110,5 +118,15 @@ class MatchPrediction extends Model
     public function getOver25PredictionAttribute(): string
     {
         return $this->over_2_5_probability > $this->under_2_5_probability ? 'Over 2.5' : 'Under 2.5';
+    }
+
+    public function getOver05FirstHalfPredictionAttribute(): string
+    {
+        return $this->over_0_5_first_half_probability > 0.5 ? 'Over 0.5 1T' : 'Under 0.5 1T';
+    }
+
+    public function getTotalFirstHalfGoalsPredictionAttribute(): float
+    {
+        return round($this->home_goals_first_half_prediction + $this->away_goals_first_half_prediction, 2);
     }
 }

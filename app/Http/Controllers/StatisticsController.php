@@ -138,7 +138,6 @@ class StatisticsController extends Controller
             'over_2_5' => $this->getOver25Details(),
             'under_2_5' => $this->getUnder25Details(),
             'first_half_over_0_5' => $this->getFirstHalfOver05Details(),
-            'first_half_over_1_5' => $this->getFirstHalfOver15Details(),
             'match_outcome' => $this->getMatchOutcomeDetails(),
             default => null
         };
@@ -505,10 +504,6 @@ class StatisticsController extends Controller
             $query->whereHas('prediction', function($q) {
                 $q->whereNotNull('first_half_over_0_5_probability');
             });
-        } elseif ($type === 'first_half_over_1_5') {
-            $query->whereHas('prediction', function($q) {
-                $q->whereNotNull('first_half_over_1_5_probability');
-            });
         }
 
         return $query->orderBy('match_date', 'desc')->get();
@@ -525,7 +520,6 @@ class StatisticsController extends Controller
             'over_2_5' => $this->isOver25Correct($match),
             'under_2_5' => $this->isUnder25Correct($match),
             'first_half_over_0_5' => $prediction->first_half_over_0_5_correct ?? false,
-            'first_half_over_1_5' => $prediction->first_half_over_1_5_correct ?? false,
             default => false
         };
     }
@@ -618,39 +612,4 @@ class StatisticsController extends Controller
         return min(2, intval($totalGoals * 0.6)); // Fallback
     }
 
-    private function getFirstHalfOver15Details()
-    {
-        $matches = FootballMatch::with(['prediction', 'homeTeam', 'awayTeam'])
-            ->where('status', 'finished')
-            ->whereHas('prediction', function($query) {
-                $query->whereNotNull('first_half_over_1_5_probability');
-            })
-            ->orderBy('match_date', 'desc')
-            ->limit(20)
-            ->get();
-
-        $details = [];
-        
-        foreach ($matches as $match) {
-            // Simulate first half goals based on total goals
-            $totalGoals = $match->home_goals + $match->away_goals;
-            $firstHalfGoals = $this->simulateFirstHalfGoals($totalGoals, $match->id);
-            
-            $predictedOver15 = $match->prediction->first_half_over_1_5_probability > 0.5;
-            $actualOver15 = $firstHalfGoals > 1.5;
-            $correct = $actualOver15 === $predictedOver15;
-
-            $details[] = [
-                'match' => $match->homeTeam->name . ' vs ' . $match->awayTeam->name,
-                'date' => $match->match_date->format('d/m/Y'),
-                'score' => $match->home_goals . '-' . $match->away_goals . ' (1T: ' . $firstHalfGoals . ')',
-                'actual' => $actualOver15 ? 'Sí' : 'No',
-                'predicted' => $predictedOver15 ? 'Sí' : 'No',
-                'confidence' => round($match->prediction->first_half_over_1_5_probability * 100, 1) . '%',
-                'correct' => $correct
-            ];
-        }
-
-        return $details;
-    }
 }
