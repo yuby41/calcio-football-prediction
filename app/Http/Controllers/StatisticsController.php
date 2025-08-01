@@ -561,8 +561,9 @@ class StatisticsController extends Controller
             ->whereHas('prediction', function($query) {
                 $query->whereNotNull('first_half_over_0_5_probability');
             })
+            ->whereNotNull('home_goals_first_half')  // Only matches with real first half data
             ->orderBy('match_date', 'desc')
-            ->limit(20)
+            ->limit(50)
             ->get();
 
         $details = [];

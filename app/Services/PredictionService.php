@@ -292,7 +292,7 @@ class PredictionService
             'both_teams_score_probability' => round($bothTeamsScoreProb, 4),
             'over_2_5_probability' => round($over25Prob, 4),
             'under_2_5_probability' => round(1 - $over25Prob, 4),
-            'over_0_5_first_half_probability' => round($over05FirstHalfProb, 4),
+            'first_half_over_0_5_probability' => round($over05FirstHalfProb, 4),
             'home_goals_first_half_prediction' => round($homeGoalsFirstHalf, 2),
             'away_goals_first_half_prediction' => round($awayGoalsFirstHalf, 2),
             'predicted_outcome' => $predictedOutcome,

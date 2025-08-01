@@ -72,6 +72,11 @@ class Kernel extends ConsoleKernel
                  ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
+        // Fetch real first half data for finished matches every 4 hours
+        $schedule->command('matches:fetch-first-half-data --limit=50')
+                 ->everyFourHours()
+                 ->withoutOverlapping();
+
 
         // Update team statistics every 2 hours
         $schedule->command('team:generate-statistics')
