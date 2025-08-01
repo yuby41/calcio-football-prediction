@@ -43,7 +43,7 @@ class StatisticsService
                 'accuracy_percentage' => round($accuracy, 2),
                 'monthly_stats' => $monthlyStats,
                 'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
+                'last_updated' => Carbon::now(),
             ]
         );
     }
@@ -139,6 +139,7 @@ class StatisticsService
     {
         return FootballMatch::with(['prediction', 'homeTeam', 'awayTeam'])
             ->where('status', 'finished')
+            ->where('match_date', '<=', Carbon::now()) // Only past matches
             ->whereHas('prediction')
             ->whereNotNull('home_goals')
             ->whereNotNull('away_goals')
@@ -320,7 +321,7 @@ class StatisticsService
                 'accuracy_percentage' => round($accuracy, 2),
                 'monthly_stats' => $monthlyStats,
                 'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
+                'last_updated' => Carbon::now(),
             ]
         );
     }
@@ -356,7 +357,7 @@ class StatisticsService
                 'accuracy_percentage' => round($accuracy, 2),
                 'monthly_stats' => $monthlyStats,
                 'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
+                'last_updated' => Carbon::now(),
             ]
         );
     }
@@ -393,7 +394,7 @@ class StatisticsService
                 'accuracy_percentage' => round($accuracy, 2),
                 'monthly_stats' => $monthlyStats,
                 'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
+                'last_updated' => Carbon::now(),
             ]
         );
     }
@@ -430,7 +431,7 @@ class StatisticsService
                 'accuracy_percentage' => round($accuracy, 2),
                 'monthly_stats' => $monthlyStats,
                 'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
+                'last_updated' => Carbon::now(),
             ]
         );
     }
@@ -496,7 +497,7 @@ class StatisticsService
                 'accuracy_percentage' => round($accuracy, 2),
                 'monthly_stats' => $monthlyStats,
                 'league_stats' => $leagueStats,
-                'last_updated' => Carbon::today(),
+                'last_updated' => Carbon::now(),
             ]
         );
     }

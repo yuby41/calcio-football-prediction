@@ -328,6 +328,22 @@ function hideLoader() {
     }
 }
 
+function showLoading() {
+    const container = document.getElementById('chart-container');
+    container.innerHTML = `
+        <div class="h-64 bg-gray-50 rounded-lg flex items-center justify-center">
+            <div class="text-center text-gray-600">
+                <div class="animate-spin mx-auto h-8 w-8 mb-4">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </div>
+                <p class="text-sm font-medium">Cargando gráfico...</p>
+            </div>
+        </div>
+    `;
+}
+
 function showError(message) {
     hideLoader();
     const container = document.getElementById('chart-container');
@@ -359,9 +375,18 @@ function createChart(data) {
         throw new Error('Los arrays de fechas y balances no coinciden');
     }
     
+    // Restaurar el canvas si fue reemplazado por loading
+    const container = document.getElementById('chart-container');
+    if (container && !document.getElementById('budgetChart')) {
+        container.innerHTML = '<canvas id="budgetChart" class="w-full h-64"></canvas>';
+    }
+    
     hideLoader();
     
     const canvas = document.getElementById('budgetChart');
+    if (!canvas) {
+        throw new Error('Canvas element not found after restoration');
+    }
     const ctx = canvas.getContext('2d');
     
     try {
@@ -417,27 +442,40 @@ function createChart(data) {
     }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+function initializeChart() {
     try {
-        console.log('DOM loaded, initializing chart...');
+        console.log('Initializing chart...');
         
         // Check if Chart.js is loaded
+        console.log('=== DEBUGGING CHART INITIALIZATION ===');
+        console.log('Chart.js loaded:', typeof Chart !== 'undefined');
+        console.log('Chart.js version:', typeof Chart !== 'undefined' ? Chart.version : 'N/A');
+        
+        const container = document.getElementById('chart-container');
+        console.log('Container found:', !!container);
+        
+        const canvas = document.getElementById('budgetChart');
+        console.log('Canvas found:', !!canvas);
+        
         if (typeof Chart === 'undefined') {
-            console.error('Chart.js not loaded');
-            showError('Chart.js no se pudo cargar');
+            console.error('Chart.js not loaded yet, will retry...');
+            setTimeout(initializeChart, 500); // Retry after 500ms
             return;
         }
         
-        console.log('Chart.js version:', Chart.version);
+        if (!container) {
+            console.error('Chart container not found');
+            showError('Contenedor del gráfico no encontrado');
+            return;
+        }
         
-        const canvas = document.getElementById('budgetChart');
         if (!canvas) {
             console.error('Canvas element not found');
             showError('Elemento canvas no encontrado');
             return;
         }
         
-        // Try with inline data first for debugging
+        // Intentar usar datos inline primero, luego AJAX como fallback
         const inlineData = {!! json_encode($chartData ?? ['dates' => [], 'balances' => []]) !!};
         
         console.log('Inline data:', inlineData);
@@ -447,6 +485,10 @@ document.addEventListener('DOMContentLoaded', function() {
             createChart(inlineData);
             return;
         }
+        
+        // Si no hay datos inline, cargar via AJAX
+        console.log('Loading chart data via AJAX...');
+        showLoading();
         
         const chartUrl = '{{ route("budget.chart-data", $budget) }}';
         console.log('Fetching data from:', chartUrl);
@@ -472,6 +514,12 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error('General error:', error);
         showError('Error general: ' + error.message);
     }
+}
+
+// Initialize chart when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, starting chart initialization...');
+    initializeChart();
 });
 </script>
 </div>

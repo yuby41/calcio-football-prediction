@@ -98,17 +98,17 @@ class BudgetController extends Controller
 
     public function show(BudgetConfiguration $budget)
     {
-        $budget->load(['bets.match.homeTeam', 'bets.match.awayTeam', 'budgetHistory']);
+        // Cargar solo lo esencial inicialmente
+        $budget->load(['bets' => function($query) {
+            $query->latest()->limit(20)->with(['match.homeTeam', 'match.awayTeam']);
+        }]);
         
         $performance = $this->bettingService->getStrategyPerformance($budget, 30);
         
-        // Datos para gráficos
+        // Datos básicos para el gráfico (se cargarán más datos via AJAX si es necesario)
         $chartData = $this->getChartData($budget);
         
-        // Próximas oportunidades de apuesta
-        $opportunities = $this->getBettingOpportunities($budget);
-
-        return view('budget.show', compact('budget', 'performance', 'chartData', 'opportunities'));
+        return view('budget.show', compact('budget', 'performance', 'chartData'));
     }
 
     public function recommendations(BudgetConfiguration $budget)
@@ -235,10 +235,14 @@ class BudgetController extends Controller
 
     private function getChartData(BudgetConfiguration $budget): array
     {
-        // Evolución del budget basada en el historial
-        $history = $budget->budgetHistory()
-            ->orderBy('created_at')
-            ->get();
+        // Cache key específico para este budget y su última actualización
+        $cacheKey = "budget_chart_{$budget->id}_{$budget->updated_at->timestamp}";
+        
+        return \Cache::remember($cacheKey, 1800, function() use ($budget) { // 30 minutos de cache
+            // Evolución del budget basada en el historial
+            $history = $budget->budgetHistory()
+                ->orderBy('created_at')
+                ->get();
 
         $dates = [];
         $balances = [];
@@ -296,36 +300,42 @@ class BudgetController extends Controller
             })
             ->values();
 
-        return [
-            'dates' => $dates,
-            'balances' => $balances,
-            'bet_types_distribution' => $betTypes,
-            'monthly_performance' => $monthlyPerformance,
-        ];
+            return [
+                'dates' => $dates,
+                'balances' => $balances,
+                'bet_types_distribution' => $betTypes,
+                'monthly_performance' => $monthlyPerformance,
+            ];
+        }); // Cierre del Cache::remember
     }
 
     private function getBettingOpportunities(BudgetConfiguration $budget): array
     {
-        // Incluir tanto partidos programados como partidos EN VIVO (excluyendo partidos terminados)
-        $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
-            ->whereIn('status', ['scheduled', 'live'])
-            ->whereNotIn('status', ['finished', 'cancelled', 'postponed', 'suspended']) // Excluir partidos terminados/cancelados
-            ->where(function($query) {
-                // Partidos programados para los próximos 7 días
-                $query->where('status', 'scheduled')
-                      ->where('match_date', '>=', now())
-                      ->where('match_date', '<=', now()->addDays(7));
-            })
-            ->orWhere(function($query) {
-                // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
-                $query->where('status', 'live')
-                      ->where('match_date', '>=', now()->subDay())
-                      ->where('match_date', '<=', now()->addHours(3)); // Max 3h para partidos en vivo
-            })
-            ->whereHas('prediction')
-            ->orderByRaw("CASE WHEN status = 'live' THEN 0 ELSE 1 END") // Priorizar partidos en vivo
-            ->orderBy('match_date')
-            ->get();
+        // Cache key específico para este budget y timestamp
+        $cacheKey = "budget_opportunities_{$budget->id}_" . now()->format('Y-m-d-H');
+        
+        return \Cache::remember($cacheKey, 900, function() use ($budget) { // 15 minutos de cache
+            // Incluir tanto partidos programados como partidos EN VIVO (excluyendo partidos terminados)
+            $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+                ->whereIn('status', ['scheduled', 'live'])
+                ->whereNotIn('status', ['finished', 'cancelled', 'postponed', 'suspended']) // Excluir partidos terminados/cancelados
+                ->where(function($query) {
+                    // Partidos programados para los próximos 7 días
+                    $query->where('status', 'scheduled')
+                          ->where('match_date', '>=', now())
+                          ->where('match_date', '<=', now()->addDays(7));
+                })
+                ->orWhere(function($query) {
+                    // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
+                    $query->where('status', 'live')
+                          ->where('match_date', '>=', now()->subDay())
+                          ->where('match_date', '<=', now()->addHours(3)); // Max 3h para partidos en vivo
+                })
+                ->whereHas('prediction')
+                ->orderByRaw("CASE WHEN status = 'live' THEN 0 ELSE 1 END") // Priorizar partidos en vivo
+                ->orderBy('match_date')
+                ->limit(50) // Limitar resultados para mejorar performance
+                ->get();
 
         $opportunities = [];
         $filteredMatches = 0;
@@ -543,7 +553,8 @@ class BudgetController extends Controller
             'final_top_matches_returned' => min(15, count($groupedArray))
         ]);
 
-        return array_slice($groupedArray, 0, 15); // Top 15 partidos (cada partido puede tener múltiples recomendaciones)
+            return array_slice($groupedArray, 0, 15); // Top 15 partidos (cada partido puede tener múltiples recomendaciones)
+        }); // Cierre del Cache::remember
     }
 
     /**

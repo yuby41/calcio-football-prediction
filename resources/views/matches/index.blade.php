@@ -7,7 +7,7 @@
     <!-- Header -->
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Partidos</h1>
-        <p class="mt-2 text-gray-600">Todos los partidos con predicciones y resultados</p>
+        <p class="mt-2 text-gray-600">Partidos del día con predicciones de IA (usa los filtros para ver más partidos)</p>
     </div>
 
     <!-- Filters -->
@@ -48,13 +48,23 @@
                 </select>
             </div>
 
-            <div class="md:col-span-4 flex justify-end gap-2">
-                <a href="{{ route('matches.index') }}" class="w-20 h-10 flex items-center justify-center border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
-                    Limpiar
-                </a>
-                <button type="submit" class="w-20 h-10 flex items-center justify-center border border-blue-600 rounded-lg text-sm font-medium text-blue-600 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    Filtrar
-                </button>
+            <div class="md:col-span-4 flex justify-between items-center">
+                <div class="flex gap-2">
+                    <a href="{{ route('matches.index') }}" class="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        🏠 Partidos del Día
+                    </a>
+                    <a href="{{ route('matches.index', ['date_from' => now()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d')]) }}" class="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                        📅 Solo Hoy
+                    </a>
+                </div>
+                <div class="flex gap-2">
+                    <a href="{{ route('matches.index') }}" class="w-20 h-10 flex items-center justify-center border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
+                        Limpiar
+                    </a>
+                    <button type="submit" class="w-20 h-10 flex items-center justify-center border border-blue-600 rounded-lg text-sm font-medium text-blue-600 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Filtrar
+                    </button>
+                </div>
             </div>
         </form>
     </div>

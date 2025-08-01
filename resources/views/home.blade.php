@@ -111,7 +111,7 @@
                     </div>
                     <div class="ml-5 w-0 flex-1">
                         <dl>
-                            <dt class="text-sm font-medium text-gray-500 truncate">Próximos Días</dt>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Próximos 30 Días</dt>
                             <dd class="text-lg font-medium text-gray-900">{{ $upcomingMatches->total() }}</dd>
                         </dl>
                     </div>

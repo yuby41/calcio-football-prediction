@@ -26,12 +26,33 @@ class SyncHistoricalData extends Command
 
     // Liga codes with their API IDs
     private const LEAGUE_MAPPING = [
+        // First Divisions
         'PL' => 39,    // Premier League
         'PD' => 140,   // La Liga
         'BL1' => 78,   // Bundesliga
         'SA' => 135,   // Serie A
         'FL1' => 61,   // Ligue 1
         'PPL' => 94,   // Primeira Liga (Liga Portugal)
+        
+        // Second Divisions
+        'ELC' => 40,   // Championship (England)
+        'PD2' => 141,  // Segunda División (Spain)
+        'BL2' => 79,   // 2. Bundesliga (Germany)
+        'SB' => 136,   // Serie B (Italy)
+        'FL2' => 62,   // Ligue 2 (France)
+        'PPL2' => 95,  // Liga Portugal 2
+        
+        // Third and Fourth Divisions
+        'EL1' => 41,   // League One (England)
+        'EL2' => 42,   // League Two (England)
+        
+        // Americas Leagues
+        'BSA' => 71,   // Brasileirão Serie A (Brazil)
+        'APA' => 128,  // Primera División (Argentina)
+        'MX1' => 262,  // Liga MX (Mexico)
+        'MLS' => 253,  // Major League Soccer (USA)
+        
+        // European Competitions
         'CL' => 2,     // Champions League
         'EL' => 3,     // Europa League
     ];

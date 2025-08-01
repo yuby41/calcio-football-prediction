@@ -119,6 +119,25 @@ class Kernel extends ConsoleKernel
                  ->everySixHours()
                  ->withoutOverlapping();
 
+        // ==========================================
+        // 🔧 AUTOMATED RESULT CORRECTION SYSTEM
+        // ==========================================
+        
+        // Auto-correct suspicious match results every 2 hours
+        $schedule->command('matches:auto-correct --confidence=8')
+                 ->everyTwoHours()
+                 ->withoutOverlapping();
+
+        // Detect suspicious results for manual review every 6 hours
+        $schedule->command('matches:detect-suspicious --days=3')
+                 ->everySixHours()
+                 ->withoutOverlapping();
+
+        // Verify overall match result integrity daily
+        $schedule->command('matches:verify-results --fix')
+                 ->dailyAt('02:00')
+                 ->withoutOverlapping();
+
         // Comprehensive team statistics recalculation weekly (Saturdays at 1 AM)
         $schedule->command('teams:calculate-statistics --force')
                  ->weekly()

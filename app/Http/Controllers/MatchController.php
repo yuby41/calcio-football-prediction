@@ -13,6 +13,14 @@ class MatchController extends Controller
     {
         $query = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction']);
 
+        // Default to today's matches if no date filters are applied
+        $hasDateFilters = $request->has('date_from') || $request->has('date_to');
+        if (!$hasDateFilters) {
+            // Show matches from today and nearby dates (yesterday to tomorrow)
+            $query->whereDate('match_date', '>=', Carbon::today()->subDay())
+                  ->whereDate('match_date', '<=', Carbon::today()->addDay());
+        }
+
         // Filter by status
         if ($request->has('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
@@ -35,7 +43,7 @@ class MatchController extends Controller
             });
         }
 
-        $matches = $query->orderBy('match_date', 'desc')->paginate(20);
+        $matches = $query->orderBy('match_date', 'asc')->paginate(20);
         $teams = Team::where('is_active', true)->orderBy('name')->get();
 
         return view('matches.index', compact('matches', 'teams'));
@@ -101,6 +109,14 @@ class MatchController extends Controller
 
         $query = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction']);
 
+        // Default to today's matches if no date filters are applied
+        $hasDateFilters = $request->has('date_from') || $request->has('date_to');
+        if (!$hasDateFilters) {
+            // Show matches from today and nearby dates (yesterday to tomorrow)
+            $query->whereDate('match_date', '>=', Carbon::today()->subDay())
+                  ->whereDate('match_date', '<=', Carbon::today()->addDay());
+        }
+
         // Filter by status
         if ($request->has('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
@@ -123,7 +139,7 @@ class MatchController extends Controller
             });
         }
 
-        $matches = $query->orderBy('match_date', 'desc')->take(100)->get();
+        $matches = $query->orderBy('match_date', 'asc')->take(100)->get();
 
         return response()->json([
             'matches' => $matches,

@@ -30,12 +30,12 @@ class HomeController extends Controller
             ->orderBy('match_date')
             ->paginate($perPage, ['*'], 'today_page');
 
-        // Get upcoming scheduled matches (next 7 days, excluding today) with pagination
+        // Get upcoming scheduled matches (next 30 days, excluding today) with pagination
         $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
             ->where('status', 'scheduled')
             ->whereBetween('match_date', [
                 Carbon::tomorrow(),
-                Carbon::now()->addDays(7)
+                Carbon::now()->addDays(30)
             ])
             ->orderBy('match_date')
             ->paginate($perPage, ['*'], 'upcoming_page');
@@ -81,12 +81,12 @@ class HomeController extends Controller
             ->orderBy('match_date')
             ->get();
 
-        // Get upcoming matches (next 7 days, excluding today)
+        // Get upcoming matches (next 30 days, excluding today)
         $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
             ->where('status', 'scheduled')
             ->whereBetween('match_date', [
                 Carbon::tomorrow(),
-                Carbon::now()->addDays(7)
+                Carbon::now()->addDays(30)
             ])
             ->orderBy('match_date')
             ->take(25)
