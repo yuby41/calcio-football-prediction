@@ -84,7 +84,7 @@
 
     <!-- Second Row -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        @foreach(['over_2_5', 'under_2_5', 'first_half_over_0_5'] as $type)
+        @foreach(['over_2_5', 'under_2_5'] as $type)
             @php
                 $stat = $statistics[$type] ?? null;
                 $colors = [
@@ -127,7 +127,7 @@
 
     <!-- Charts Section (Hidden by default) -->
     <div id="charts-section" class="hidden">
-        @foreach(['match_outcome', 'both_teams_score_yes', 'both_teams_score_no', 'over_2_5', 'under_2_5', 'first_half_over_0_5'] as $type)
+        @foreach(['match_outcome', 'both_teams_score_yes', 'both_teams_score_no', 'over_2_5', 'under_2_5'] as $type)
             @php
                 $stat = $statistics[$type] ?? null;
                 if (!$stat) continue;
@@ -179,7 +179,6 @@
                         <option value="both_teams_score_no">No Gol</option>
                         <option value="over_2_5">Over 2.5 Goles</option>
                         <option value="under_2_5">Under 2.5 Goles</option>
-                        <option value="first_half_over_0_5">Over 0.5 Goles (1T)</option>
                     </select>
                 </div>
             </div>
