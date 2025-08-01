@@ -568,9 +568,8 @@ class StatisticsController extends Controller
         $details = [];
         
         foreach ($matches as $match) {
-            // Simulate first half goals based on total goals
-            $totalGoals = $match->home_goals + $match->away_goals;
-            $firstHalfGoals = $this->simulateFirstHalfGoals($totalGoals, $match->id);
+            // Use REAL first half goals data
+            $firstHalfGoals = ($match->home_goals_first_half ?? 0) + ($match->away_goals_first_half ?? 0);
             
             $predictedOver05 = $match->prediction->first_half_over_0_5_probability > 0.5;
             $actualOver05 = $firstHalfGoals > 0.5;
@@ -579,7 +578,7 @@ class StatisticsController extends Controller
             $details[] = [
                 'match' => $match->homeTeam->name . ' vs ' . $match->awayTeam->name,
                 'date' => $match->match_date->format('d/m/Y'),
-                'score' => $match->home_goals . '-' . $match->away_goals . ' (1T: ' . $firstHalfGoals . ')',
+                'score' => $match->home_goals . '-' . $match->away_goals . ' (1T: ' . ($match->home_goals_first_half ?? '?') . '-' . ($match->away_goals_first_half ?? '?') . ')',
                 'actual' => $actualOver05 ? 'Sí' : 'No',
                 'predicted' => $predictedOver05 ? 'Sí' : 'No',
                 'confidence' => round($match->prediction->first_half_over_0_5_probability * 100, 1) . '%',

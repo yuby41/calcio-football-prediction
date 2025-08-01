@@ -20,6 +20,8 @@ class FootballMatch extends Model
         'match_date',
         'home_goals',
         'away_goals',
+        'home_goals_first_half',
+        'away_goals_first_half',
         'status',
         'league',
         'season',
