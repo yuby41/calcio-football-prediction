@@ -72,6 +72,11 @@ class Kernel extends ConsoleKernel
                  ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
+        // Generate first half predictions for finished matches every 2 hours
+        $schedule->command('predictions:generate-first-half')
+                 ->everyTwoHours()
+                 ->withoutOverlapping();
+
         // Update team statistics every 2 hours
         $schedule->command('team:generate-statistics')
                  ->everyTwoHours()
