@@ -23,7 +23,7 @@ class PredictionStatistic extends Model
     protected $casts = [
         'monthly_stats' => 'array',
         'league_stats' => 'array',
-        'last_updated' => 'date',
+        'last_updated' => 'datetime',
         'accuracy_percentage' => 'decimal:2',
     ];
 
