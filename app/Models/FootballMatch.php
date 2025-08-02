@@ -34,7 +34,7 @@ class FootballMatch extends Model
         'odds' => 'array',
         'home_goals' => 'integer',
         'away_goals' => 'integer',
-        'round' => 'integer',
+        'round' => 'string',
     ];
 
     public function homeTeam(): BelongsTo
@@ -74,6 +74,15 @@ class FootballMatch extends Model
         }
 
         return $this->home_goals + $this->away_goals;
+    }
+
+    public function getTotalFirstHalfGoalsAttribute(): ?int
+    {
+        if (is_null($this->home_goals_first_half) || is_null($this->away_goals_first_half)) {
+            return null;
+        }
+
+        return $this->home_goals_first_half + $this->away_goals_first_half;
     }
 
     public function isFinished(): bool

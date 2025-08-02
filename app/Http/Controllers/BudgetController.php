@@ -136,7 +136,14 @@ class BudgetController extends Controller
                 'amount' => 'nullable|integer|min:2',
             ]);
 
-            $match = FootballMatch::with('prediction')->findOrFail($validated['match_id']);
+            try {
+                $match = FootballMatch::with('prediction')->findOrFail($validated['match_id']);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Partido no encontrado.'
+                ], 404);
+            }
             
             if (!$match->prediction) {
                 return response()->json([
@@ -146,7 +153,21 @@ class BudgetController extends Controller
             }
 
             // Obtener confianza de la predicción
-            $confidence = $this->getConfidenceForBetType($match, $validated['bet_type']);
+            try {
+                $confidence = $this->getConfidenceForBetType($match, $validated['bet_type']);
+                
+                if ($confidence <= 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'No se puede calcular la confianza para este tipo de apuesta.'
+                    ], 422);
+                }
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error al calcular la confianza de la predicción.'
+                ], 500);
+            }
             
             if ($confidence < $budget->min_confidence) {
                 return response()->json([
@@ -675,7 +696,7 @@ class BudgetController extends Controller
             'over_0_5' => $this->calculateOver05Probability($match),
             'under_0_5' => $this->calculateUnder05Probability($match),
             'both_teams_score' => $match->prediction->both_teams_score_probability ?? 0,
-            'over_0_5_first_half' => $match->prediction->over_0_5_first_half_probability ?? 0,
+            'over_0_5_first_half' => $match->prediction->first_half_over_0_5_probability ?? 0,
             default => 0,
         };
 

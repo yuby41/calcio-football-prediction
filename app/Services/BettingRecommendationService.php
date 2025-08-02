@@ -27,18 +27,19 @@ class BettingRecommendationService
     {
         // Obtener partidos próximos Y en vivo con predicciones
         $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
-            ->whereIn('status', ['scheduled', 'live'])
             ->where(function($query) {
-                // Partidos programados para los próximos 7 días
-                $query->where('status', 'scheduled')
-                      ->where('match_date', '>=', now())
-                      ->where('match_date', '<=', now()->addDays(7));
-            })
-            ->orWhere(function($query) {
-                // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
-                $query->where('status', 'live')
-                      ->where('match_date', '>=', now()->subDay())
-                      ->where('match_date', '<=', now()->addHours(3));
+                $query->where(function($subQuery) {
+                    // Partidos programados para los próximos 7 días
+                    $subQuery->where('status', 'scheduled')
+                             ->where('match_date', '>=', now())
+                             ->where('match_date', '<=', now()->addDays(7));
+                })
+                ->orWhere(function($subQuery) {
+                    // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
+                    $subQuery->where('status', 'live')
+                             ->where('match_date', '>=', now()->subDay())
+                             ->where('match_date', '<=', now()->addHours(3));
+                });
             })
             ->whereHas('prediction')
             ->orderByRaw("CASE WHEN status = 'live' THEN 0 ELSE 1 END") // Priorizar partidos en vivo
@@ -132,7 +133,7 @@ class BettingRecommendationService
                 'prediction_type' => 'under_2_5'
             ],
             'over_0_5_first_half' => [
-                'probability' => $prediction->over_0_5_first_half_probability,
+                'probability' => $prediction->first_half_over_0_5_probability,
                 'label' => 'Over 0.5 1T',
                 'description' => 'Más de 0.5 goles en el primer tiempo',
                 'prediction_type' => 'first_half_over_0_5'
@@ -165,8 +166,13 @@ class BettingRecommendationService
             // Confianza combinada: promedio ponderado (70% predicción, 30% estadísticas)
             $combinedConfidence = ($matchConfidence * 0.7) + ($statisticsAccuracy * 0.3);
             
-            // Solo recomendar si supera el mínimo de confianza
-            if ($combinedConfidence >= $budget->min_confidence) {
+            // Ajustar umbral de confianza para partidos programados (son naturalmente menos predecibles)
+            $confidenceThreshold = $match->status === 'scheduled' 
+                ? max($budget->min_confidence - 15, 45) // Reducir 15% para programados, mínimo 45%
+                : $budget->min_confidence;
+            
+            // Solo recomendar si supera el umbral ajustado de confianza
+            if ($combinedConfidence >= $confidenceThreshold) {
                 $oddsSource = $realOdds[$betType . '_source'] ?? $realOdds['source'] ?? 'bet365_fallback';
                 
                 $recommendation = $this->createRecommendationWithRealOdds(
@@ -254,8 +260,9 @@ class BettingRecommendationService
             'value_rating' => round($valueRating, 1),
             'odds_source' => $oddsSource, // Fuente real de las odds (bet365_real, pinnacle_real, etc.)
             'is_live' => $match->status === 'live',
-            'live_indicator' => $match->status === 'live' ? '🔴 EN VIVO' : '',
+            'live_indicator' => $match->status === 'live' ? '🔴 EN VIVO' : '📅 PROGRAMADO',
             'urgency' => $match->status === 'live' ? 'ALTA' : $this->getMatchUrgency($match),
+            'confidence_adjusted' => $match->status === 'scheduled',
         ];
     }
 

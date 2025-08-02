@@ -441,7 +441,7 @@ class StatisticsService
         $finishedMatches = $this->getFinishedMatchesWithPredictions()
             ->filter(function($match) {
                 return $match->prediction && 
-                       !is_null($match->prediction->over_0_5_first_half_probability);
+                       !is_null($match->prediction->first_half_over_0_5_probability);
             });
 
         // Update first half statistics if needed
@@ -452,7 +452,7 @@ class StatisticsService
             
             // Over 0.5 first half
             if (is_null($match->prediction->first_half_over_0_5_correct)) {
-                $predictedOver05 = $match->prediction->over_0_5_first_half_probability > 0.5;
+                $predictedOver05 = $match->prediction->first_half_over_0_5_probability > 0.5;
                 $actualOver05 = $firstHalfGoals > 0.5;
                 $match->prediction->first_half_over_0_5_correct = $actualOver05 === $predictedOver05;
             }

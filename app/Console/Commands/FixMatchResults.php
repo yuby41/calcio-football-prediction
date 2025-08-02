@@ -176,7 +176,7 @@ class FixMatchResults extends Command
     {
         $this->info('💰 Recalculando budgets afectados...');
         
-        // Usar el servicio de recálculo que ya existe
-        $this->call('budget:recalculate-all');
+        // Usar el comando de recálculo correcto
+        $this->call('budget:recalculate');
     }
 }

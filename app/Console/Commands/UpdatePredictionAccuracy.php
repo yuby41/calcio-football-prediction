@@ -2,86 +2,114 @@
 
 namespace App\Console\Commands;
 
-use App\Models\FootballMatch;
 use App\Models\MatchPrediction;
 use Illuminate\Console\Command;
 
 class UpdatePredictionAccuracy extends Command
 {
-    protected $signature = 'predictions:update-accuracy {--force}';
-    
-    protected $description = 'Update prediction accuracy for all finished matches';
-    
-    public function handle(): int
+    protected $signature = 'predictions:update-accuracy {--limit=100 : Limit the number of predictions to update}';
+    protected $description = 'Update prediction accuracy for finished matches';
+
+    public function handle()
     {
-        $this->info('Updating prediction accuracy for finished matches...');
+        $limit = $this->option('limit');
         
-        $force = $this->option('force');
+        $this->info("Actualizando precisión de predicciones para partidos finalizados...");
         
-        // Get finished matches with predictions
-        $query = FootballMatch::with(['prediction'])
-            ->where('status', 'finished')
-            ->whereHas('prediction')
-            ->whereNotNull('home_goals')
-            ->whereNotNull('away_goals');
-            
-        if (!$force) {
-            // Only update predictions where is_correct is null
-            $query->whereHas('prediction', function($q) {
-                $q->whereNull('is_correct');
-            });
+        // Get predictions for finished matches that need accuracy updates
+        $predictions = MatchPrediction::whereHas('match', function($query) {
+            $query->where('status', 'finished');
+        })
+        ->whereNull('both_teams_score_correct') // Only update those not yet calculated
+        ->orWhereNull('over_under_correct')
+        ->limit($limit)
+        ->get();
+
+        if ($predictions->isEmpty()) {
+            $this->info('No hay predicciones que necesiten actualización.');
+            return 0;
         }
-        
-        $matches = $query->get();
-        
-        if ($matches->isEmpty()) {
-            $this->info('No matches need accuracy updates.');
-            return Command::SUCCESS;
-        }
-        
+
         $updated = 0;
-        
-        foreach ($matches as $match) {
-            $prediction = $match->prediction;
-            
-            // Determine actual match result
-            $actualResult = $this->determineMatchResult($match);
-            
-            // Update match outcome prediction
-            $prediction->is_correct = $prediction->predicted_outcome === $actualResult;
-            
-            // Update both teams score prediction
-            if (!is_null($prediction->both_teams_score_probability)) {
-                $actualBothScored = $match->home_goals > 0 && $match->away_goals > 0;
-                $predictedBothScore = $prediction->both_teams_score_probability > 0.5;
-                $prediction->both_teams_score_correct = $actualBothScored === $predictedBothScore;
+        $progressBar = $this->output->createProgressBar($predictions->count());
+        $progressBar->start();
+
+        foreach ($predictions as $prediction) {
+            try {
+                $prediction->checkAccuracy();
+                $updated++;
+            } catch (\Exception $e) {
+                $this->error("\nError actualizando predicción ID {$prediction->id}: " . $e->getMessage());
             }
-            
-            // Update over/under 2.5 prediction
-            if (!is_null($prediction->over_2_5_probability)) {
-                $totalGoals = $match->home_goals + $match->away_goals;
-                $actualOver25 = $totalGoals > 2.5;
-                $predictedOver25 = $prediction->over_2_5_probability > ($prediction->under_2_5_probability ?? 0);
-                $prediction->over_under_correct = $actualOver25 === $predictedOver25;
-            }
-            
-            $prediction->save();
-            $updated++;
+            $progressBar->advance();
         }
-        
-        $this->info("Updated accuracy for {$updated} predictions.");
-        
-        return Command::SUCCESS;
+
+        $progressBar->finish();
+        $this->newLine();
+        $this->info("✅ Actualizadas {$updated} predicciones exitosamente.");
+
+        // Show some statistics
+        $this->showAccuracyStats();
+
+        return 0;
     }
-    
-    private function determineMatchResult(FootballMatch $match): string
+
+    private function showAccuracyStats()
     {
-        if ($match->home_goals > $match->away_goals) {
-            return 'home_win';
-        } elseif ($match->home_goals < $match->away_goals) {
-            return 'away_win';
-        } else {
-            return 'draw';
+        $this->newLine();
+        $this->info('📊 Estadísticas de Precisión:');
+
+        $totalFinished = MatchPrediction::whereHas('match', function($query) {
+            $query->where('status', 'finished');
+        })->whereNotNull('is_correct')->count();
+
+        if ($totalFinished === 0) {
+            $this->warn('No hay datos de precisión disponibles.');
+            return;
+        }
+
+        // Result accuracy
+        $resultCorrect = MatchPrediction::whereHas('match', function($query) {
+            $query->where('status', 'finished');
+        })->where('is_correct', true)->count();
+        
+        $resultAccuracy = round(($resultCorrect / $totalFinished) * 100, 1);
+        $this->line("🎯 Precisión Resultado: {$resultAccuracy}% ({$resultCorrect}/{$totalFinished})");
+
+        // Both teams score accuracy
+        $bothTeamsCorrect = MatchPrediction::whereHas('match', function($query) {
+            $query->where('status', 'finished');
+        })->where('both_teams_score_correct', true)->count();
+        
+        $bothTeamsAccuracy = round(($bothTeamsCorrect / $totalFinished) * 100, 1);
+        $this->line("⚽ Precisión Ambos Anotan: {$bothTeamsAccuracy}% ({$bothTeamsCorrect}/{$totalFinished})");
+
+        // Over/Under accuracy
+        $overUnderCorrect = MatchPrediction::whereHas('match', function($query) {
+            $query->where('status', 'finished');
+        })->where('over_under_correct', true)->count();
+        
+        $overUnderAccuracy = round(($overUnderCorrect / $totalFinished) * 100, 1);
+        $this->line("🥅 Precisión Over/Under 2.5: {$overUnderAccuracy}% ({$overUnderCorrect}/{$totalFinished})");
+
+        // Overall accuracy
+        $predictions = MatchPrediction::whereHas('match', function($query) {
+            $query->where('status', 'finished');
+        })->whereNotNull('is_correct')->get();
+
+        $totalAccuracySum = 0;
+        $count = 0;
+        foreach ($predictions as $prediction) {
+            $accuracy = $prediction->overall_accuracy;
+            if (!is_null($accuracy)) {
+                $totalAccuracySum += $accuracy;
+                $count++;
+            }
+        }
+
+        if ($count > 0) {
+            $avgAccuracy = round($totalAccuracySum / $count, 1);
+            $this->line("📈 Precisión Promedio General: {$avgAccuracy}%");
         }
     }
 }

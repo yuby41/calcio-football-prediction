@@ -55,37 +55,22 @@ class PredictionService
                 return true;
             }
             
-            $pythonScript = base_path('ml/football_predictor.py');
-            
-            // Try multiple Python configurations for Homestead VM
             $mlPath = base_path('ml');
-            $commands = [
-                "cd {$mlPath} && source venv/bin/activate && python football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-                "cd {$mlPath} && python3 football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-                "python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}",
-                "/usr/bin/python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}"
-            ];
-            
             $predictionData = null;
             
-            foreach ($commands as $command) {
-                $process = Process::fromShellCommandline($command);
-                $process->setTimeout(30);
-                $process->run();
-                
-                if ($process->isSuccessful()) {
-                    $output = $process->getOutput();
-                    $predictionData = json_decode($output, true);
-                    
-                    if ($predictionData && is_array($predictionData)) {
-                        break; // Success!
-                    }
-                } else {
-                    Log::warning("Command failed: {$command}. Error: " . $process->getErrorOutput());
-                }
+            // Try enhanced predictor first if available
+            if ($this->hasEnhancedModels()) {
+                Log::info("Using enhanced ML predictor for match {$match->id}");
+                $predictionData = $this->predictWithEnhancedModels($match, $mlPath);
             }
             
-            // If ML prediction failed, create a basic prediction based on team stats
+            // Fallback to original predictor if enhanced not available or failed
+            if (!$predictionData) {
+                Log::info("Using standard ML predictor for match {$match->id}");
+                $predictionData = $this->predictWithStandardModels($match, $mlPath);
+            }
+            
+            // If both ML predictions failed, create a basic prediction based on team stats
             if (!$predictionData) {
                 Log::warning("ML prediction failed for match {$match->id}, using fallback prediction");
                 $predictionData = $this->createFallbackPrediction($match);
@@ -143,6 +128,97 @@ class PredictionService
         return $this->generatePredictionsForMatches($finishedMatches);
     }
     
+    private function hasEnhancedModels(): bool
+    {
+        $modelsPath = base_path('ml/models');
+        $requiredFiles = [
+            'enhanced_outcome_model.pkl',
+            'enhanced_scaler.pkl',
+            'enhanced_metadata.json'
+        ];
+        
+        foreach ($requiredFiles as $file) {
+            if (!file_exists($modelsPath . '/' . $file)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    private function predictWithEnhancedModels(FootballMatch $match, string $mlPath): ?array
+    {
+        $commands = [
+            "cd {$mlPath} && source venv/bin/activate && python enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "cd {$mlPath} && python3 enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "/usr/bin/python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}"
+        ];
+        
+        foreach ($commands as $command) {
+            try {
+                $process = Process::fromShellCommandline($command);
+                $process->setTimeout(45); // Longer timeout for enhanced models
+                $process->run();
+                
+                if ($process->isSuccessful()) {
+                    $output = $process->getOutput();
+                    $predictionData = json_decode($output, true);
+                    
+                    if ($predictionData && is_array($predictionData) && isset($predictionData['model_version'])) {
+                        Log::info("Enhanced ML prediction successful for match {$match->id}", [
+                            'model_version' => $predictionData['model_version'],
+                            'confidence' => $predictionData['confidence_score'] ?? 'unknown'
+                        ]);
+                        return $predictionData;
+                    }
+                } else {
+                    Log::debug("Enhanced command failed: {$command}. Error: " . $process->getErrorOutput());
+                }
+            } catch (\Exception $e) {
+                Log::debug("Enhanced prediction exception: " . $e->getMessage());
+            }
+        }
+        
+        return null;
+    }
+    
+    private function predictWithStandardModels(FootballMatch $match, string $mlPath): ?array
+    {
+        $pythonScript = base_path('ml/football_predictor.py');
+        
+        $commands = [
+            "cd {$mlPath} && source venv/bin/activate && python football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "cd {$mlPath} && python3 football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}",
+            "/usr/bin/python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}"
+        ];
+        
+        foreach ($commands as $command) {
+            try {
+                $process = Process::fromShellCommandline($command);
+                $process->setTimeout(30);
+                $process->run();
+                
+                if ($process->isSuccessful()) {
+                    $output = $process->getOutput();
+                    $predictionData = json_decode($output, true);
+                    
+                    if ($predictionData && is_array($predictionData)) {
+                        Log::info("Standard ML prediction successful for match {$match->id}");
+                        return $predictionData;
+                    }
+                } else {
+                    Log::debug("Standard command failed: {$command}. Error: " . $process->getErrorOutput());
+                }
+            } catch (\Exception $e) {
+                Log::debug("Standard prediction exception: " . $e->getMessage());
+            }
+        }
+        
+        return null;
+    }
+
     private function checkPythonDependencies(): bool
     {
         try {
@@ -297,7 +373,7 @@ class PredictionService
             'away_goals_first_half_prediction' => round($awayGoalsFirstHalf, 2),
             'predicted_outcome' => $predictedOutcome,
             'confidence_score' => round($confidence, 4),
-            'model_version' => 'enhanced_fallback_2.4_fixed_seasons',
+            'model_version' => 'enhanced_fallback_2.5_with_ml_integration',
             'features_used' => ['team_strength', 'home_advantage', 'expected_goals', 'first_half_analysis', 'historical_data']
         ];
     }

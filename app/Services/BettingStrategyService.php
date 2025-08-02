@@ -142,7 +142,7 @@ class BettingStrategyService
             'over_2_5' => $this->probabilityToOdds($match->prediction->over_2_5_probability),
             'under_2_5' => $this->probabilityToOdds($match->prediction->under_2_5_probability),
             'both_teams_score' => $this->probabilityToOdds($match->prediction->both_teams_score_probability),
-            'over_0_5_first_half' => $this->probabilityToOdds($match->prediction->over_0_5_first_half_probability),
+            'over_0_5_first_half' => $this->probabilityToOdds($match->prediction->first_half_over_0_5_probability),
             default => 2.0,
         };
     }

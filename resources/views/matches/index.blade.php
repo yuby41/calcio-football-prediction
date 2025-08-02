@@ -148,12 +148,14 @@
                                             Confianza: {{ $match->prediction->confidence_level }}
                                         </div>
                                         
-                                        @if($match->status === 'finished' && !is_null($match->prediction->is_correct))
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
-                                                @if($match->prediction->is_correct) bg-green-100 text-green-800
-                                                @else bg-red-100 text-red-800 @endif">
-                                                @if($match->prediction->is_correct) ✓ Correcto
-                                                @else ✗ Incorrecto @endif
+                                        @if($match->status === 'finished' && !is_null($match->prediction->overall_accuracy))
+                                            @php
+                                                $accuracy = $match->prediction->overall_accuracy;
+                                                $accuracyClass = $accuracy >= 75 ? 'bg-green-100 text-green-800' : 
+                                                               ($accuracy >= 50 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
+                                            @endphp
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {{ $accuracyClass }}">
+                                                {{ $accuracy }}% Precisión
                                             </span>
                                         @endif
                                     </div>
@@ -161,22 +163,81 @@
 
                                 <div class="mt-2 grid grid-cols-3 gap-4 text-xs text-gray-500">
                                     <div>
-                                        <div class="font-medium mb-1">Resultado</div>
+                                        <div class="font-medium mb-1 flex items-center justify-between">
+                                            <span>Resultado</span>
+                                            @if($match->status === 'finished' && !is_null($match->prediction->is_correct))
+                                                <span class="ml-1">
+                                                    @if($match->prediction->is_correct) 
+                                                        ✅
+                                                    @else 
+                                                        ❌
+                                                    @endif
+                                                </span>
+                                            @endif
+                                        </div>
                                         <div>Casa: {{ number_format($match->prediction->home_win_probability * 100, 1) }}%</div>
                                         <div>Empate: {{ number_format($match->prediction->draw_probability * 100, 1) }}%</div>
                                         <div>Visitante: {{ number_format($match->prediction->away_win_probability * 100, 1) }}%</div>
+                                        @if($match->status === 'finished')
+                                            <div class="text-blue-600 font-medium mt-1">
+                                                Real: 
+                                                @if($match->result === 'home_win') Casa
+                                                @elseif($match->result === 'draw') Empate
+                                                @else Visitante
+                                                @endif
+                                            </div>
+                                        @endif
                                     </div>
                                     <div>
-                                        <div class="font-medium mb-1">Ambos Anotan</div>
+                                        <div class="font-medium mb-1 flex items-center justify-between">
+                                            <span>Ambos Anotan</span>
+                                            @if($match->status === 'finished' && !is_null($match->prediction->both_teams_score_correct))
+                                                <span class="ml-1">
+                                                    @if($match->prediction->both_teams_score_correct) 
+                                                        ✅
+                                                    @else 
+                                                        ❌
+                                                    @endif
+                                                </span>
+                                            @endif
+                                        </div>
                                         <div>{{ $match->prediction->both_teams_score_prediction }}</div>
                                         <div class="text-gray-400">({{ number_format($match->prediction->both_teams_score_probability * 100, 1) }}%)</div>
+                                        @if($match->status === 'finished')
+                                            @php
+                                                $actualBoth = ($match->home_goals > 0 && $match->away_goals > 0);
+                                            @endphp
+                                            <div class="text-blue-600 font-medium mt-1">
+                                                Real: {{ $actualBoth ? 'Sí' : 'No' }}
+                                            </div>
+                                        @endif
                                     </div>
                                     <div>
-                                        <div class="font-medium mb-1">Total Goles</div>
+                                        <div class="font-medium mb-1 flex items-center justify-between">
+                                            <span>Total Goles</span>
+                                            @if($match->status === 'finished' && !is_null($match->prediction->over_under_correct))
+                                                <span class="ml-1">
+                                                    @if($match->prediction->over_under_correct) 
+                                                        ✅
+                                                    @else 
+                                                        ❌
+                                                    @endif
+                                                </span>
+                                            @endif
+                                        </div>
                                         <div>{{ $match->prediction->over_25_prediction }}</div>
                                         <div class="text-gray-400">
                                             Over: {{ number_format($match->prediction->over_2_5_probability * 100, 1) }}%
                                         </div>
+                                        @if($match->status === 'finished')
+                                            @php
+                                                $totalGoals = $match->home_goals + $match->away_goals;
+                                                $actualOver25 = $totalGoals > 2.5;
+                                            @endphp
+                                            <div class="text-blue-600 font-medium mt-1">
+                                                Real: {{ $actualOver25 ? 'Over 2.5' : 'Under 2.5' }} ({{ $totalGoals }})
+                                            </div>
+                                        @endif
                                     </div>
                                 </div>
                             </div>

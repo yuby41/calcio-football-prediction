@@ -73,6 +73,7 @@ class Bet extends Model
             'under_0_5' => 'Menos de 0.5 Goles',
             'both_teams_score' => 'Ambos Equipos Marcan',
             'over_0_5_first_half' => 'Over 0.5 1T',
+            'first_half_over_0_5' => 'Over 0.5 1T',
             default => ucfirst(str_replace('_', ' ', $this->bet_type)),
         };
     }
@@ -108,7 +109,8 @@ class Bet extends Model
 
     public function calculateResult(): array
     {
-        if (!$this->isResolvable()) {
+        // Check if match is finished, regardless of bet status
+        if (!$this->match || $this->match->status !== 'finished') {
             return ['status' => 'pending', 'profit' => 0];
         }
 
@@ -153,10 +155,11 @@ class Bet extends Model
                 $won = $match->home_goals > 0 && $match->away_goals > 0;
                 break;
             case 'over_0_5_first_half':
-                // Note: First half goals data not currently available in FootballMatch model
-                // For now, use prediction accuracy from MatchPrediction if available
-                if ($match->prediction && !is_null($match->prediction->over_0_5_first_half_correct)) {
-                    $won = $match->prediction->over_0_5_first_half_correct;
+            case 'first_half_over_0_5':
+                // Use REAL first half goals data
+                if (!is_null($match->home_goals_first_half) && !is_null($match->away_goals_first_half)) {
+                    $firstHalfGoals = $match->home_goals_first_half + $match->away_goals_first_half;
+                    $won = $firstHalfGoals > 0.5;
                 } else {
                     // Fallback: Cannot determine result without first half data
                     return ['status' => 'pending', 'profit' => 0];
@@ -177,27 +180,50 @@ class Bet extends Model
      */
     private function inferMatchResultBet($match): bool
     {
-        // Si la apuesta fue ganada, inferir qué resultado se apostó
+        // Si la apuesta ya fue ganada o perdida, usar el estado existente
         if ($this->status === 'won') {
-            if ($match->home_goals > $match->away_goals) {
-                return true; // Se apostó victoria local
-            } elseif ($match->home_goals < $match->away_goals) {
-                return true; // Se apostó victoria visitante
-            } else {
-                return true; // Se apostó empate
-            }
+            return true;
         }
-        
-        // Si la apuesta fue perdida, verificar que efectivamente se perdió
         if ($this->status === 'lost') {
-            // La apuesta se perdió, así que el resultado no coincide con lo apostado
             return false;
         }
         
-        // Para apuestas pendientes, intentar inferir basándose en las odds
-        // (esto es más complejo y puede requerir análisis de patrones)
+        // Para apuestas pendientes, inferir basándose en las odds
+        $actualResult = $match->result; // home_win, draw, away_win
         
-        // Por ahora, si no podemos inferir, devolver el estado almacenado
-        return $this->status === 'won';
+        // Inferir qué se apostó basándose en las odds típicas
+        $inferredBet = $this->inferBetTypeFromOdds();
+        
+        // Comparar el resultado real con lo que se infirió
+        return $actualResult === $inferredBet;
+    }
+    
+    /**
+     * Infer what was bet based on odds ranges
+     */
+    private function inferBetTypeFromOdds(): string
+    {
+        $odds = $this->odds;
+        
+        // Basándose en rangos de odds típicos:
+        // Home win: 1.2 - 3.0 (más común: 1.5 - 2.5)
+        // Draw: 2.8 - 4.5 (más común: 3.0 - 4.0) 
+        // Away win: 1.8 - 8.0+ (más común: 2.0 - 5.0)
+        
+        if ($odds >= 1.2 && $odds <= 2.1) {
+            // Odds bajas = favorito = probablemente victoria local
+            return 'home_win';
+        } elseif ($odds >= 2.8 && $odds <= 4.5) {
+            // Odds medias-altas = probablemente empate
+            return 'draw';
+        } elseif ($odds >= 2.1 && $odds <= 2.8) {
+            // Rango ambiguo - podría ser home_win con odds altas o away_win con odds bajas
+            // Usar contexto adicional si está disponible
+            // Por defecto asumir victoria local si las odds no son muy altas
+            return $odds <= 2.4 ? 'home_win' : 'away_win';
+        } else {
+            // Odds muy altas = underdog = probablemente victoria visitante
+            return 'away_win';
+        }
     }
 }

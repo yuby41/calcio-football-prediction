@@ -41,7 +41,7 @@ class StatisticsController extends Controller
 
     public function chartData(Request $request)
     {
-        $type = $request->get('type');
+        $type = $request->get('type', 'match_outcome'); // default to match_outcome if null
         $period = $request->get('period', 'monthly'); // daily, weekly, monthly, yearly
         
         $chartData = match($period) {
@@ -563,7 +563,7 @@ class StatisticsController extends Controller
             })
             ->whereNotNull('home_goals_first_half')  // Only matches with real first half data
             ->orderBy('match_date', 'desc')
-            ->limit(50)
+            ->limit(20)  // Same limit as other detail methods
             ->get();
 
         $details = [];

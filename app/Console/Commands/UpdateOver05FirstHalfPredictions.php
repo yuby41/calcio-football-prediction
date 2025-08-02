@@ -17,7 +17,7 @@ class UpdateOver05FirstHalfPredictions extends Command
         $this->info("🔄 Actualizando predicciones con campos Over 0.5 First Half...");
         
         // Obtener predicciones que necesitan actualización
-        $predictions = MatchPrediction::whereNull('over_0_5_first_half_probability')
+        $predictions = MatchPrediction::whereNull('first_half_over_0_5_probability')
             ->whereNotNull('home_goals_prediction')
             ->whereNotNull('away_goals_prediction')
             ->limit($limit)
@@ -52,7 +52,7 @@ class UpdateOver05FirstHalfPredictions extends Command
                 $prediction->update([
                     'home_goals_first_half_prediction' => round($homeGoalsFirstHalf, 2),
                     'away_goals_first_half_prediction' => round($awayGoalsFirstHalf, 2),
-                    'over_0_5_first_half_probability' => round($over05FirstHalfProb, 4)
+                    'first_half_over_0_5_probability' => round($over05FirstHalfProb, 4)
                 ]);
                 
                 $updated++;
@@ -70,7 +70,7 @@ class UpdateOver05FirstHalfPredictions extends Command
         $this->info("✅ Actualizadas {$updated} predicciones con campos Over 0.5 First Half");
         
         // Mostrar estadísticas
-        $totalWithOver05 = MatchPrediction::whereNotNull('over_0_5_first_half_probability')->count();
+        $totalWithOver05 = MatchPrediction::whereNotNull('first_half_over_0_5_probability')->count();
         $totalPredictions = MatchPrediction::count();
         $percentage = round(($totalWithOver05 / $totalPredictions) * 100, 1);
         

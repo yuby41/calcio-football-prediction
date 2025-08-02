@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Services\FootballApiService;
+use App\Services\EnhancedFootballApiService;
 use App\Services\PredictionService;
 use Illuminate\Console\Command;
 
@@ -13,7 +13,7 @@ class SyncTodayMatches extends Command
     protected $description = 'Sync today\'s matches from all leagues and generate predictions';
     
     public function __construct(
-        private FootballApiService $footballApiService,
+        private EnhancedFootballApiService $footballApiService,
         private PredictionService $predictionService
     ) {
         parent::__construct();

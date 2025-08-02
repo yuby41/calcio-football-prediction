@@ -18,8 +18,23 @@ class Kernel extends ConsoleKernel
                  ->withoutOverlapping();
 
         // Update prediction accuracy every 30 minutes
-        $schedule->command('accuracy:update --force')
+        $schedule->command('predictions:update-accuracy --limit=50')
                  ->everyThirtyMinutes()
+                 ->withoutOverlapping();
+
+        // Resolve pending bets every 15 minutes
+        $schedule->command('bets:resolve-pending --limit=25')
+                 ->everyFifteenMinutes()
+                 ->withoutOverlapping();
+
+        // Verify bet calculations every hour
+        $schedule->command('bets:verify-calculations --fix --limit=100')
+                 ->hourly()
+                 ->withoutOverlapping();
+
+        // Verify match results every 2 hours
+        $schedule->command('matches:verify-results --fix --limit=20')
+                 ->everyTwoHours()
                  ->withoutOverlapping();
 
         // Update statistics every hour (using SQL to avoid mbstring dependency)
@@ -27,10 +42,7 @@ class Kernel extends ConsoleKernel
                  ->hourly()
                  ->withoutOverlapping();
 
-        // Sync today's matches every 2 hours
-        $schedule->command('football:sync-today')
-                 ->everyTwoHours()
-                 ->withoutOverlapping();
+        // Legacy command removed - replaced by optimized version below
 
         // ==========================================
         // 🚀 OPTIMIZED API USAGE (7500 daily requests)
