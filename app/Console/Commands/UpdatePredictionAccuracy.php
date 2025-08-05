@@ -20,8 +20,11 @@ class UpdatePredictionAccuracy extends Command
         $predictions = MatchPrediction::whereHas('match', function($query) {
             $query->where('status', 'finished');
         })
-        ->whereNull('both_teams_score_correct') // Only update those not yet calculated
-        ->orWhereNull('over_under_correct')
+        ->where(function($query) {
+            $query->whereNull('both_teams_score_correct') // Only update those not yet calculated
+                  ->orWhereNull('over_under_correct')
+                  ->orWhereNull('first_half_over_0_5_correct'); // Include first half predictions
+        })
         ->limit($limit)
         ->get();
 

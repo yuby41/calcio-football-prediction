@@ -17,10 +17,20 @@ class Kernel extends ConsoleKernel
                  ->everyTenMinutes()
                  ->withoutOverlapping();
 
-        // Update prediction accuracy every 30 minutes
-        $schedule->command('predictions:update-accuracy --limit=50')
+        // ==========================================
+        // 🚀 OPTIMIZED UNIFIED COMMANDS
+        // ==========================================
+        
+        // Unified predictions maintenance (replaces 6 separate commands)
+        $schedule->command('predictions:maintenance-optimized --light')
                  ->everyThirtyMinutes()
-                 ->withoutOverlapping();
+                 ->withoutOverlapping()
+                 ->runInBackground();
+
+        $schedule->command('predictions:maintenance-optimized --comprehensive')
+                 ->hourly()
+                 ->withoutOverlapping()
+                 ->runInBackground();
 
         // Resolve pending bets every 15 minutes
         $schedule->command('bets:resolve-pending --limit=25')
@@ -48,21 +58,28 @@ class Kernel extends ConsoleKernel
         // 🚀 OPTIMIZED API USAGE (7500 daily requests)
         // ==========================================
         
-        // LIVE MATCHES: Ultra-frequent updates (every 2 minutes during match hours)
-        $schedule->command('football:sync-fixtures-optimized --type=live --with-events --with-stats')
-                 ->everyTwoMinutes()
-                 ->between('08:00', '23:00') // European match hours
-                 ->withoutOverlapping();
+        // ==========================================
+        // 🤖 INTELLIGENT SYNC SYSTEM
+        // ==========================================
+        
+        // Intelligent sync (auto-adjusts frequency based on time/day)
+        $schedule->command('football:sync-intelligent')
+                 ->everyFiveMinutes()
+                 ->between('14:00', '22:00') // Peak match hours
+                 ->weekends()
+                 ->withoutOverlapping()
+                 ->runInBackground();
 
-        // TODAY'S MATCHES: Frequent updates (every 10 minutes)
-        $schedule->command('football:sync-fixtures-optimized --type=today --with-stats')
-                 ->everyTenMinutes()
-                 ->withoutOverlapping();
+        $schedule->command('football:sync-intelligent')
+                 ->everyFifteenMinutes()
+                 ->withoutOverlapping()
+                 ->runInBackground();
 
-        // WEEKLY MATCHES: Regular updates (every 30 minutes)
-        $schedule->command('football:sync-fixtures-optimized --type=week --leagues=PL,PD,BL1,SA,FL1')
-                 ->everyThirtyMinutes()
-                 ->withoutOverlapping();
+        // Standings sync - reduced frequency
+        $schedule->command('football:sync-standings --leagues=PL,PD,BL1,SA,FL1 --with-stats --quiet')
+                 ->hourly()
+                 ->withoutOverlapping()
+                 ->runInBackground();
 
         // SEASON DATA: Comprehensive sync (every 2 hours)
         $schedule->command('football:sync-fixtures-optimized --type=season --leagues=PL,PD,BL1,SA,FL1,CL,EL')
@@ -84,20 +101,36 @@ class Kernel extends ConsoleKernel
                  ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
-        // Fetch real first half data for finished matches every 4 hours
-        $schedule->command('matches:fetch-first-half-data --limit=50')
-                 ->everyFourHours()
-                 ->withoutOverlapping();
-
-
-        // Update team statistics every 2 hours
-        $schedule->command('team:generate-statistics')
+        // Fetch real first half data for finished matches every 2 hours with higher limit
+        $schedule->command('matches:fetch-first-half-data --limit=100 --days=2')
                  ->everyTwoHours()
                  ->withoutOverlapping();
 
-        // Refresh active prediction types every 4 hours
-        $schedule->command('predictions:refresh-active')
-                 ->everyFourHours()
+        // First half data processing (reduced frequency)
+        $schedule->command('matches:fix-first-half-pending --limit=25 --quiet')
+                 ->everyTwoHours()
+                 ->withoutOverlapping()
+                 ->runInBackground();
+
+        // ==========================================
+        // 🌙 NIGHT MAINTENANCE (01:00-06:00)
+        // ==========================================
+        
+        // Heavy maintenance during low activity
+        $schedule->command('app:audit-systematic-issues --fix --quiet')
+                 ->dailyAt('01:30')
+                 ->withoutOverlapping();
+
+        $schedule->command('app:fix-critical-issues --quiet')
+                 ->dailyAt('02:00')
+                 ->withoutOverlapping();
+
+        $schedule->command('team:generate-statistics --quiet')
+                 ->dailyAt('02:30')
+                 ->withoutOverlapping();
+
+        $schedule->command('statistics:fix-with-api-endpoints --limit=100 --days=3 --quiet')
+                 ->dailyAt('03:30')
                  ->withoutOverlapping();
 
         // ==========================================
@@ -109,9 +142,9 @@ class Kernel extends ConsoleKernel
                  ->hourly()
                  ->withoutOverlapping();
 
-        // Clean old logs weekly
-        $schedule->command('logs:clean --days=7')
-                 ->weekly()
+        // Optimized log management
+        $schedule->command('logs:clean --days=3 --quiet')
+                 ->twiceDaily(2, 14)
                  ->withoutOverlapping();
 
         // ==========================================
@@ -161,6 +194,11 @@ class Kernel extends ConsoleKernel
                  ->weekly()
                  ->saturdays()
                  ->at('01:00')
+                 ->withoutOverlapping();
+
+        // Fix statistics with FT/HT API endpoints every 4 hours
+        $schedule->command('statistics:fix-with-api-endpoints --limit=50 --days=3')
+                 ->everyFourHours()
                  ->withoutOverlapping();
     }
 

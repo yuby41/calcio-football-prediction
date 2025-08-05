@@ -775,23 +775,58 @@ class FootballPredictor:
         home_matches = max(1, home_stats['matches_played'])
         away_matches = max(1, away_stats['matches_played'])
         
+        # Base stats with safe division
+        home_win_rate = home_stats['wins'] / home_matches
+        away_win_rate = away_stats['wins'] / away_matches
+        home_draw_rate = home_stats.get('draws', 0) / home_matches
+        away_draw_rate = away_stats.get('draws', 0) / away_matches
+        
+        # Goal statistics
+        home_goals_for = home_stats.get('goals_for', 0) 
+        home_goals_against = home_stats.get('goals_against', 0)
+        away_goals_for = away_stats.get('goals_for', 0)
+        away_goals_against = away_stats.get('goals_against', 0)
+        
+        # Average goals (with fallback)
+        home_avg_goals_for = home_stats.get('avg_goals_for', home_goals_for / home_matches)
+        home_avg_goals_against = home_stats.get('avg_goals_against', home_goals_against / home_matches)
+        away_avg_goals_for = away_stats.get('avg_goals_for', away_goals_for / away_matches)
+        away_avg_goals_against = away_stats.get('avg_goals_against', away_goals_against / away_matches)
+        
+        # Clean sheets
+        home_clean_sheets = home_stats.get('clean_sheets', 0)
+        away_clean_sheets = away_stats.get('clean_sheets', 0)
+        
         features = [
-            home_stats['wins'] / home_matches,  # home_win_rate
-            away_stats['wins'] / away_matches,  # away_win_rate
-            home_stats['goals_for'] - home_stats['goals_against'],  # home_goal_difference
-            away_stats['goals_for'] - away_stats['goals_against'],  # away_goal_difference
-            home_stats['points'] / home_matches,  # home_points_per_game
-            away_stats['points'] / away_matches,  # away_points_per_game
-            home_stats['avg_goals_for'] / (away_stats['avg_goals_against'] + 0.1),  # attack_strength_home
-            home_stats['avg_goals_against'] / (away_stats['avg_goals_for'] + 0.1),  # defense_strength_home
-            away_stats['avg_goals_for'] / (home_stats['avg_goals_against'] + 0.1),  # attack_strength_away
-            away_stats['avg_goals_against'] / (home_stats['avg_goals_for'] + 0.1),  # defense_strength_away
-            (home_stats['wins'] * 3 + home_stats['draws']) / home_matches,  # home_form
-            (away_stats['wins'] * 3 + away_stats['draws']) / away_matches,  # away_form
-            home_stats['avg_goals_for'],
-            home_stats['avg_goals_against'],
-            away_stats['avg_goals_for'],
-            away_stats['avg_goals_against']
+            home_win_rate,  # home_win_rate
+            away_win_rate,  # away_win_rate
+            home_draw_rate,  # home_draw_rate
+            away_draw_rate,  # away_draw_rate
+            home_goals_for - home_goals_against,  # home_goal_difference
+            away_goals_for - away_goals_against,  # away_goal_difference
+            home_stats.get('points', 0) / home_matches,  # home_points_per_game
+            away_stats.get('points', 0) / away_matches,  # away_points_per_game
+            home_avg_goals_for / (away_avg_goals_against + 0.1),  # attack_strength_home
+            home_avg_goals_against / (away_avg_goals_for + 0.1),  # defense_strength_home
+            away_avg_goals_for / (home_avg_goals_against + 0.1),  # attack_strength_away
+            away_avg_goals_against / (home_avg_goals_for + 0.1),  # defense_strength_away
+            (home_stats.get('wins', 0) * 3 + home_stats.get('draws', 0)) / home_matches,  # home_form
+            (away_stats.get('wins', 0) * 3 + away_stats.get('draws', 0)) / away_matches,  # away_form
+            home_win_rate * 1.2 if home_matches >= 5 else home_win_rate,  # home_recent_form (approximation)
+            away_win_rate * 1.2 if away_matches >= 5 else away_win_rate,  # away_recent_form (approximation)
+            1.0 - abs(home_avg_goals_for - (home_goals_for / home_matches)) if home_matches > 1 else 1.0,  # home_goals_consistency
+            1.0 - abs(away_avg_goals_for - (away_goals_for / away_matches)) if away_matches > 1 else 1.0,  # away_goals_consistency
+            home_clean_sheets / home_matches,  # home_clean_sheet_rate
+            away_clean_sheets / away_matches,  # away_clean_sheet_rate
+            (home_avg_goals_for - 1.5) / 2.0,  # home_attack_vs_league (normalized)
+            (away_avg_goals_for - 1.5) / 2.0,  # away_attack_vs_league (normalized)
+            (1.5 - home_avg_goals_against) / 2.0,  # home_defense_vs_league (normalized)
+            (1.5 - away_avg_goals_against) / 2.0,  # away_defense_vs_league (normalized)
+            0.0,  # h2h_advantage (placeholder - would need historical H2H data)
+            home_avg_goals_for,  # home_avg_goals_for
+            home_avg_goals_against,  # home_avg_goals_against
+            away_avg_goals_for,  # away_avg_goals_for
+            away_avg_goals_against  # away_avg_goals_against
         ]
         
         return features

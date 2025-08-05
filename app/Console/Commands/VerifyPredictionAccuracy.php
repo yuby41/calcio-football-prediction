@@ -150,6 +150,31 @@ class VerifyPredictionAccuracy extends Command
             }
         }
 
+        // Check first half over 0.5 consistency
+        if (!is_null($prediction->first_half_over_0_5_correct) && 
+            !is_null($match->home_goals_first_half) && !is_null($match->away_goals_first_half)) {
+            
+            $actualFirstHalfGoals = $match->home_goals_first_half + $match->away_goals_first_half;
+            $predictedFirstHalfOver05 = $prediction->first_half_over_0_5_probability > 0.5;
+            $actualFirstHalfOver05 = $actualFirstHalfGoals > 0.5;
+            $expectedFirstHalfCorrect = $actualFirstHalfOver05 === $predictedFirstHalfOver05;
+            
+            if ($prediction->first_half_over_0_5_correct != $expectedFirstHalfCorrect) {
+                $hasInconsistency = true;
+                $this->error("\n❌ INCONSISTENCIA PRIMER TIEMPO en predicción ID {$prediction->id}:");
+                $this->line("   🎯 Predicción Over 0.5 1T: " . ($predictedFirstHalfOver05 ? 'Sí' : 'No'));
+                $this->line("   📊 Goles primer tiempo: {$actualFirstHalfGoals} (" . ($actualFirstHalfOver05 ? 'Over' : 'Under') . " 0.5)");
+                $this->line("   ❗ Marcado como: " . ($prediction->first_half_over_0_5_correct ? 'CORRECTO' : 'INCORRECTO'));
+                $this->line("   ✅ Debería ser: " . ($expectedFirstHalfCorrect ? 'CORRECTO' : 'INCORRECTO'));
+                
+                if ($fix) {
+                    $prediction->first_half_over_0_5_correct = $expectedFirstHalfCorrect;
+                    $prediction->save();
+                    $this->info("   🔧 PRIMER TIEMPO CORREGIDO");
+                }
+            }
+        }
+
         return $hasInconsistency;
     }
 }

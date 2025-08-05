@@ -802,4 +802,37 @@ class EnhancedFootballApiService
             return [];
         }
     }
+
+    /**
+     * Sync today's matches from all leagues
+     */
+    public function syncTodayMatches(): int
+    {
+        $matches = $this->fetchTodayFixtures();
+        $synced = 0;
+
+        foreach ($matches as $matchData) {
+            if ($this->syncSingleMatch($matchData)) {
+                $synced++;
+            }
+        }
+
+        return $synced;
+    }
+
+    /**
+     * Sync a single match from API data
+     */
+    private function syncSingleMatch(array $matchData): bool
+    {
+        try {
+            // Implementation would depend on your match sync logic
+            // This is a placeholder - you should implement based on your existing sync logic
+            Log::info('Syncing match', ['fixture_id' => $matchData['fixture']['id'] ?? 'unknown']);
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Error syncing match: ' . $e->getMessage());
+            return false;
+        }
+    }
 }

@@ -13,6 +13,14 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         //
     })
+    ->withSchedule(function ($schedule) {
+        // Import scheduling from Console\Kernel.php
+        $kernel = new App\Console\Kernel(app(), app('events'));
+        $reflection = new ReflectionClass($kernel);
+        $method = $reflection->getMethod('schedule');
+        $method->setAccessible(true);
+        $method->invoke($kernel, $schedule);
+    })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();

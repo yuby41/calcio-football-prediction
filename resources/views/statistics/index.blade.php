@@ -420,7 +420,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Initialize league chart
-    @if($statistics['match_outcome'] ?? null)
+    @if($statistics->has('match_outcome'))
         fetch('/statistics/league-data?type=match_outcome')
             .then(response => response.json())
             .then(data => {

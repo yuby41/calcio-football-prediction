@@ -156,13 +156,22 @@ class Bet extends Model
                 break;
             case 'over_0_5_first_half':
             case 'first_half_over_0_5':
-                // Use REAL first half goals data
+                // Use REAL first half goals data if available
                 if (!is_null($match->home_goals_first_half) && !is_null($match->away_goals_first_half)) {
                     $firstHalfGoals = $match->home_goals_first_half + $match->away_goals_first_half;
                     $won = $firstHalfGoals > 0.5;
                 } else {
-                    // Fallback: Cannot determine result without first half data
-                    return ['status' => 'pending', 'profit' => 0];
+                    // Fallback: For finished matches without first half data, use conservative inference
+                    // If the final result is 0-0, assume first half was also 0-0 (lost bet)
+                    // For any other final result, we cannot safely infer without risking false positives
+                    $totalGoals = $match->home_goals + $match->away_goals;
+                    if ($totalGoals === 0) {
+                        // If final is 0-0, very likely first half was also 0-0
+                        $won = false;
+                    } else {
+                        // For other results, mark as pending to avoid incorrect resolution
+                        return ['status' => 'pending', 'profit' => 0];
+                    }
                 }
                 break;
         }

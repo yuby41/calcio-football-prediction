@@ -31,6 +31,6 @@
     "away_avg_goals_against"
   ],
   "model_version": "2.0.0-ensemble",
-  "trained_at": "2025-08-01T01:29:04.611644",
+  "trained_at": "2025-08-06T01:27:15.524315",
   "ensemble_type": "XGBoost + Neural Network + Random Forest"
 }

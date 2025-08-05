@@ -57,21 +57,27 @@ class StatisticsController extends Controller
 
     public function leagueData(Request $request)
     {
-        $type = $request->get('type', 'match_outcome');
-        
-        $stat = PredictionStatistic::where('prediction_type', $type)->first();
-        
-        if (!$stat || !$stat->league_stats) {
-            return response()->json(['labels' => [], 'data' => []]);
-        }
+        try {
+            $type = $request->get('type', 'match_outcome');
+            
+            $stat = PredictionStatistic::where('prediction_type', $type)->first();
+            
+            if (!$stat || !$stat->league_stats) {
+                return response()->json(['labels' => [], 'data' => []]);
+            }
 
         $leagueStats = $stat->league_stats;
         
-        // Filter leagues with at least 3 matches for meaningful statistics
+        // Filter leagues with at least 3 matches for meaningful statistics and clean UTF-8
         $filteredStats = [];
         foreach ($leagueStats as $league => $stats) {
             if (($stats['total'] ?? 0) >= 3) {
-                $filteredStats[$league] = $stats;
+                // Clean the league name
+                $cleanLeague = preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $league);
+                $cleanLeague = mb_convert_encoding($cleanLeague, 'UTF-8', 'UTF-8');
+                if (!empty($cleanLeague)) {
+                    $filteredStats[$cleanLeague] = $stats;
+                }
             }
         }
         
@@ -103,7 +109,7 @@ class StatisticsController extends Controller
         
         $colorIndex = 0;
         foreach ($topLeagues as $league => $stats) {
-            // Shorten league names if too long
+            // League name should already be clean from previous step
             $displayName = strlen($league) > 25 ? substr($league, 0, 22) . '...' : $league;
             
             $labels[] = $displayName;
@@ -112,12 +118,16 @@ class StatisticsController extends Controller
             $colorIndex++;
         }
 
-        return response()->json([
-            'labels' => $labels,
-            'data' => $accuracies,
-            'colors' => $colors,
-            'fullNames' => array_keys($topLeagues) // Para tooltips completos
-        ]);
+            return response()->json([
+                'labels' => $labels,
+                'data' => $accuracies,
+                'colors' => $colors,
+                'fullNames' => array_keys($topLeagues) // Already cleaned
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error in leagueData: ' . $e->getMessage());
+            return response()->json(['labels' => [], 'data' => [], 'error' => $e->getMessage()]);
+        }
     }
 
     public function refresh()
@@ -561,7 +571,7 @@ class StatisticsController extends Controller
             ->whereHas('prediction', function($query) {
                 $query->whereNotNull('first_half_over_0_5_probability');
             })
-            ->whereNotNull('home_goals_first_half')  // Only matches with real first half data
+            // Removed ->whereNotNull('home_goals_first_half') to show same matches as other stats
             ->orderBy('match_date', 'desc')
             ->limit(20)  // Same limit as other detail methods
             ->get();
@@ -569,18 +579,28 @@ class StatisticsController extends Controller
         $details = [];
         
         foreach ($matches as $match) {
-            // Use REAL first half goals data
-            $firstHalfGoals = ($match->home_goals_first_half ?? 0) + ($match->away_goals_first_half ?? 0);
-            
             $predictedOver05 = $match->prediction->first_half_over_0_5_probability > 0.5;
-            $actualOver05 = $firstHalfGoals > 0.5;
-            $correct = $actualOver05 === $predictedOver05;
+            
+            // Check if we have real first half data
+            if (!is_null($match->home_goals_first_half) && !is_null($match->away_goals_first_half)) {
+                // Use REAL first half goals data
+                $firstHalfGoals = $match->home_goals_first_half + $match->away_goals_first_half;
+                $actualOver05 = $firstHalfGoals > 0.5;
+                $correct = $actualOver05 === $predictedOver05;
+                $scoreDisplay = $match->home_goals . '-' . $match->away_goals . ' (1T: ' . $match->home_goals_first_half . '-' . $match->away_goals_first_half . ')';
+                $actualDisplay = $actualOver05 ? 'Sí' : 'No';
+            } else {
+                // For matches without first half data, show as pending/unknown
+                $correct = null;  // Cannot determine accuracy without data
+                $scoreDisplay = $match->home_goals . '-' . $match->away_goals . ' (1T: pendiente)';
+                $actualDisplay = 'Pendiente';
+            }
 
             $details[] = [
                 'match' => $match->homeTeam->name . ' vs ' . $match->awayTeam->name,
                 'date' => $match->match_date->format('d/m/Y'),
-                'score' => $match->home_goals . '-' . $match->away_goals . ' (1T: ' . ($match->home_goals_first_half ?? '?') . '-' . ($match->away_goals_first_half ?? '?') . ')',
-                'actual' => $actualOver05 ? 'Sí' : 'No',
+                'score' => $scoreDisplay,
+                'actual' => $actualDisplay,
                 'predicted' => $predictedOver05 ? 'Sí' : 'No',
                 'confidence' => round($match->prediction->first_half_over_0_5_probability * 100, 1) . '%',
                 'correct' => $correct
