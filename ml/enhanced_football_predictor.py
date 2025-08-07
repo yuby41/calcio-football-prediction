@@ -682,6 +682,20 @@ class EnhancedFootballPredictor:
         over_25_prob = max(0.05, min(0.95, (total_goals_pred - 2.0) / 2.5 + 0.5))
         under_25_prob = 1 - over_25_prob
         
+        # FIRST HALF PREDICTIONS (Enhanced calculation)
+        # Estimate first half goals as ~45-55% of total goals depending on game flow
+        home_first_half_pred = home_goals_pred * 0.48  # Slightly conservative
+        away_first_half_pred = away_goals_pred * 0.48
+        total_first_half_pred = home_first_half_pred + away_first_half_pred
+        
+        # First half over 0.5 probability using Poisson-based calculation
+        # P(X > 0.5) = 1 - P(X = 0) where X ~ Poisson(lambda)
+        first_half_no_goals_prob = np.exp(-total_first_half_pred)  # P(0 goals)
+        first_half_over_05_prob = 1 - first_half_no_goals_prob
+        
+        # Apply some realism bounds (first half goals are less predictable)
+        first_half_over_05_prob = max(0.25, min(0.85, first_half_over_05_prob))
+        
         return {
             'home_goals_prediction': float(round(home_goals_pred, 2)),
             'away_goals_prediction': float(round(away_goals_pred, 2)),
@@ -691,6 +705,9 @@ class EnhancedFootballPredictor:
             'both_teams_score_probability': float(round(both_teams_score_prob, 4)),
             'over_2_5_probability': float(round(over_25_prob, 4)),
             'under_2_5_probability': float(round(under_25_prob, 4)),
+            'first_half_over_0_5_probability': float(round(first_half_over_05_prob, 4)),
+            'home_goals_first_half_prediction': float(round(home_first_half_pred, 2)),
+            'away_goals_first_half_prediction': float(round(away_first_half_pred, 2)),
             'predicted_outcome': str(predicted_outcome),
             'confidence_score': float(round(confidence, 4)),
             'model_version': str(self.model_version),
@@ -764,6 +781,34 @@ class EnhancedFootballPredictor:
         
         return features[:len(self.feature_columns)]  # Ensure correct length
 
+    def load_enhanced_models(self, path: str = None):
+        """Load enhanced models from disk"""
+        path = path or os.path.join(os.path.dirname(__file__), 'models')
+        
+        try:
+            # Load the outcome model
+            outcome_model_path = os.path.join(path, 'enhanced_outcome_model.pkl')
+            if os.path.exists(outcome_model_path):
+                self.outcome_model = joblib.load(outcome_model_path)
+            
+            # Load the scaler
+            scaler_path = os.path.join(path, 'enhanced_scaler.pkl')
+            if os.path.exists(scaler_path):
+                self.scaler = joblib.load(scaler_path)
+            
+            # Load metadata
+            metadata_path = os.path.join(path, 'enhanced_metadata.json')
+            if os.path.exists(metadata_path):
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                    self.feature_columns = metadata.get('feature_columns', [])
+                    
+            # print("Enhanced models loaded successfully")  # Commented for JSON parsing
+            return True
+        except Exception as e:
+            print(f"Error loading enhanced models: {e}")
+            return False
+    
     def save_enhanced_models(self, path: str = None):
         """Save enhanced models"""
         path = path or os.path.join(os.path.dirname(__file__), 'models')
@@ -835,6 +880,7 @@ if __name__ == '__main__':
         home_team_id = int(sys.argv[2])
         away_team_id = int(sys.argv[3])
         
-        # Load models
+        # Load models first
+        predictor.load_enhanced_models()
         prediction = predictor.predict_enhanced_match(home_team_id, away_team_id)
         print(json.dumps(prediction, indent=2))

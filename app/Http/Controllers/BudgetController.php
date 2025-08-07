@@ -260,28 +260,45 @@ class BudgetController extends Controller
         $cacheKey = "budget_chart_{$budget->id}_{$budget->updated_at->timestamp}";
         
         return \Cache::remember($cacheKey, 1800, function() use ($budget) { // 30 minutos de cache
-            // Evolución del budget basada en el historial
-            $history = $budget->budgetHistory()
-                ->orderBy('created_at')
+            // CRITICAL FIX: Calculate budget evolution correctly using bets instead of corrupted history
+            $bets = $budget->bets()
+                ->whereIn('status', ['won', 'lost', 'pending'])
+                ->orderBy('placed_at')
                 ->get();
 
-        $dates = [];
-        $balances = [];
-        
-        // Agregar punto inicial
-        $dates[] = $budget->created_at->format('d/m');
-        $balances[] = (float) $budget->initial_budget;
-        
-        // Procesar historial día por día
-        $dailyHistory = $history->groupBy(function($item) {
-            return $item->created_at->format('Y-m-d');
-        });
+            $dates = [];
+            $balances = [];
+            
+            // Agregar punto inicial
+            $dates[] = $budget->created_at->format('d/m');
+            $currentBalance = (float) $budget->initial_budget;
+            $balances[] = $currentBalance;
+            
+            // Procesar apuestas para recalcular balance correcto
+            $dailyBets = $bets->groupBy(function($bet) {
+                return $bet->placed_at ? $bet->placed_at->format('Y-m-d') : $bet->created_at->format('Y-m-d');
+            });
 
-        foreach ($dailyHistory as $date => $records) {
-            $lastRecord = $records->last();
-            $dates[] = \Carbon\Carbon::parse($date)->format('d/m');
-            $balances[] = (float) $lastRecord->balance_after;
-        }
+            foreach ($dailyBets as $date => $dayBets) {
+                $dayStartBalance = $currentBalance;
+                
+                foreach ($dayBets as $bet) {
+                    // Deduct bet amount when placed
+                    $currentBalance -= $bet->amount;
+                    
+                    // Add winnings if bet is resolved and won
+                    if ($bet->status === 'won' && $bet->actual_profit) {
+                        $currentBalance += $bet->actual_profit + $bet->amount; // profit + original amount
+                    }
+                    // For lost bets, amount is already deducted, no additional action needed
+                }
+                
+                // Only add to chart if there was actual movement
+                if (abs($currentBalance - $dayStartBalance) > 0.01) {
+                    $dates[] = \Carbon\Carbon::parse($date)->format('d/m');
+                    $balances[] = round($currentBalance, 2);
+                }
+            }
         
         // Si no hay historial, usar balance actual
         if (empty($dates) || count($dates) === 1) {

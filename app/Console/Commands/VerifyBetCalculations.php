@@ -110,25 +110,70 @@ class VerifyBetCalculations extends Command
             ];
             
             if ($fix) {
-                // Fix the bet
-                $bet->status = $calculatedStatus;
-                $bet->actual_profit = $calculatedProfit;
-                $bet->save();
-                
-                // Update budget if needed
-                if ($bet->budgetConfiguration && $profitError) {
-                    $budget = $bet->budgetConfiguration;
-                    $profitDifference = $calculatedProfit - $storedProfit;
-                    $budget->current_budget += $profitDifference;
-                    $budget->save();
+                // CRITICAL FIX: Use database transaction for atomic operations
+                \DB::transaction(function() use ($bet, $calculatedStatus, $calculatedProfit, $storedProfit, &$error, $profitError) {
+                    // Refresh bet within transaction to prevent stale data
+                    $bet->refresh();
                     
-                    $bet->budget_after = $budget->current_budget;
+                    // Verify calculation is still needed after refresh
+                    if ($bet->status === $calculatedStatus && abs((float)$bet->actual_profit - $calculatedProfit) <= 0.01) {
+                        $error['corrected'] = false;
+                        $error['already_correct'] = true;
+                        return;
+                    }
+                    
+                    // Fix the bet
+                    $bet->status = $calculatedStatus;
+                    $bet->actual_profit = $calculatedProfit;
                     $bet->save();
                     
-                    $error['budget_adjusted'] = $profitDifference;
-                }
-                
-                $error['corrected'] = true;
+                    // Update budget if needed with proper validation
+                    if ($bet->budgetConfiguration && $profitError) {
+                        $budget = $bet->budgetConfiguration;
+                        $budget->refresh(); // Ensure fresh budget data
+                        
+                        $profitDifference = $calculatedProfit - $storedProfit;
+                        
+                        // SECURITY: Validate budget adjustment is reasonable
+                        if (abs($profitDifference) > ($budget->initial_budget * 0.5)) {
+                            throw new \Exception("Budget adjustment too large: €{$profitDifference}. Requires manual review.");
+                        }
+                        
+                        $oldBudget = $budget->current_budget;
+                        $newBudget = $oldBudget + $profitDifference;
+                        
+                        // SECURITY: Prevent negative budget from calculation errors
+                        if ($newBudget < 0) {
+                            \Log::warning("Budget correction would result in negative balance", [
+                                'bet_id' => $bet->id,
+                                'current_budget' => $oldBudget,
+                                'profit_difference' => $profitDifference,
+                                'calculated_new_budget' => $newBudget
+                            ]);
+                            throw new \Exception("Budget correction would result in negative balance. Manual review required.");
+                        }
+                        
+                        $budget->current_budget = $newBudget;
+                        $budget->save();
+                        
+                        $bet->budget_after = $newBudget;
+                        $bet->save();
+                        
+                        // Log the correction for audit trail
+                        \Log::info("Budget corrected via bet calculation verification", [
+                            'bet_id' => $bet->id,
+                            'profit_difference' => $profitDifference,
+                            'budget_before' => $oldBudget,
+                            'budget_after' => $newBudget
+                        ]);
+                        
+                        $error['budget_adjusted'] = $profitDifference;
+                        $error['budget_before'] = $oldBudget;
+                        $error['budget_after'] = $newBudget;
+                    }
+                    
+                    $error['corrected'] = true;
+                });
             }
             
             return $error;

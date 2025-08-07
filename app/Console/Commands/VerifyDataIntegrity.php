@@ -90,15 +90,14 @@ class VerifyDataIntegrity extends Command
     {
         $issues = [];
         
-        // Find teams without statistics
-        $teamsWithoutStats = Team::whereDoesntHave('statistics')->get();
+        // MEMORY FIX: Use count instead of get() for large datasets
+        $teamsWithoutStatsCount = Team::whereDoesntHave('statistics')->count();
         
-        if ($teamsWithoutStats->isNotEmpty()) {
-            $count = $teamsWithoutStats->count();
-            $issues[] = "Teams without statistics: {$count}";
+        if ($teamsWithoutStatsCount > 0) {
+            $issues[] = "Teams without statistics: {$teamsWithoutStatsCount}";
             
             if (!$silent) {
-                $this->warn("⚠️ Found {$count} teams without statistics");
+                $this->warn("⚠️ Found {$teamsWithoutStatsCount} teams without statistics");
             }
             
             if ($fix) {

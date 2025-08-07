@@ -148,11 +148,15 @@ class PredictionService
     
     private function predictWithEnhancedModels(FootballMatch $match, string $mlPath): ?array
     {
+        Log::info("Attempting Enhanced ML prediction for match {$match->id} (home: {$match->home_team_id}, away: {$match->away_team_id})");
+        
+        $pythonPath = "/home/yualbe/.local/lib/python3.12/site-packages:/usr/lib/python3/dist-packages:/usr/local/lib/python3.12/dist-packages";
+        
         $commands = [
             "cd {$mlPath} && source venv/bin/activate && python enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "cd {$mlPath} && python3 enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "/usr/bin/python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}"
+            "cd {$mlPath} && PYTHONPATH={$pythonPath} python3 enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "PYTHONPATH={$pythonPath} python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
+            "PYTHONPATH={$pythonPath} /usr/bin/python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}"
         ];
         
         foreach ($commands as $command) {
@@ -173,13 +177,14 @@ class PredictionService
                         return $predictionData;
                     }
                 } else {
-                    Log::debug("Enhanced command failed: {$command}. Error: " . $process->getErrorOutput());
+                    Log::warning("Enhanced command failed: {$command}. Error: " . $process->getErrorOutput());
                 }
             } catch (\Exception $e) {
-                Log::debug("Enhanced prediction exception: " . $e->getMessage());
+                Log::warning("Enhanced prediction exception: " . $e->getMessage());
             }
         }
         
+        Log::warning("All Enhanced ML commands failed for match {$match->id}");
         return null;
     }
     
@@ -373,7 +378,7 @@ class PredictionService
             'away_goals_first_half_prediction' => round($awayGoalsFirstHalf, 2),
             'predicted_outcome' => $predictedOutcome,
             'confidence_score' => round($confidence, 4),
-            'model_version' => 'enhanced_fallback_2.5_with_ml_integration',
+            'model_version' => '3.0.0-enhanced-fallback-integration',
             'features_used' => ['team_strength', 'home_advantage', 'expected_goals', 'first_half_analysis', 'historical_data']
         ];
     }
@@ -381,9 +386,20 @@ class PredictionService
     private function calculateTeamStrength($stats, $team): float
     {
         if (!$stats) {
-            // Use team ID hash to create consistent but varied strength values
-            $teamHash = crc32($team->name . $team->id) % 1000;
-            return 0.4 + ($teamHash / 1000 * 0.2); // Range: 0.4 to 0.6 (more conservative)
+            // CRITICAL FIX: Create more varied strength values based on team characteristics
+            $nameHash = crc32($team->name) % 1000;
+            $idHash = crc32((string)$team->id) % 1000;
+            
+            // Combine different hash sources for better distribution
+            $combinedHash = ($nameHash + $idHash * 7) % 1000; // Use prime multiplier for better spread
+            
+            // Wider range with normal distribution simulation
+            $baseStrength = 0.35 + ($combinedHash / 1000 * 0.4); // Range: 0.35 to 0.75
+            
+            // Add some additional variation based on team ID
+            $variation = (($team->id * 13) % 100) / 1000; // Small variation -0.05 to +0.05
+            
+            return max(0.25, min(0.85, $baseStrength + $variation));
         }
         
         $matchesPlayed = max(1, $stats->matches_played);

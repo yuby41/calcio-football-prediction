@@ -70,6 +70,23 @@ class ResolvePendingBets extends Command
     private function resolveBet(Bet $bet, bool $dryRun = false)
     {
         $match = $bet->match;
+        
+        // PROTECCIÓN 1: Verificar si ya fue resuelta
+        if ($bet->status !== 'pending') {
+            $this->line("⚠️  Apuesta ID {$bet->id} ya fue resuelta (status: {$bet->status})");
+            return;
+        }
+        
+        // PROTECCIÓN 2: Verificar si ya existe entrada en BudgetHistory para resolución
+        $existingHistory = \App\Models\BudgetHistory::where('bet_id', $bet->id)
+            ->whereIn('type', ['bet_won', 'bet_lost'])
+            ->exists();
+            
+        if ($existingHistory) {
+            $this->line("⚠️  Apuesta ID {$bet->id} ya tiene historial de resolución");
+            return;
+        }
+        
         $result = $bet->calculateResult();
         
         if ($result['status'] === 'pending') {
@@ -83,26 +100,47 @@ class ResolvePendingBets extends Command
         $this->line("   💵 Beneficio: €" . number_format($result['profit'], 2));
 
         if (!$dryRun) {
-            // Update bet status and profit
-            $bet->status = $result['status'];
-            $bet->actual_profit = $result['profit'];
-            $bet->resolved_at = now();
-            $bet->save();
-
-            // Update budget configuration
-            if ($bet->budgetConfiguration) {
-                $budget = $bet->budgetConfiguration;
-                $newBudget = $budget->current_budget + $result['profit'];
+            // PROTECCIÓN 3: Usar transacción para atomicidad
+            \DB::transaction(function() use ($bet, $result) {
+                // Verificar nuevamente dentro de la transacción
+                $bet->refresh();
+                if ($bet->status !== 'pending') {
+                    $this->line("⚠️  Apuesta ya resuelta por otro proceso");
+                    return;
+                }
                 
-                $this->line("   📊 Presupuesto: €{$budget->current_budget} → €" . number_format($newBudget, 2));
-                
-                $budget->current_budget = $newBudget;
-                $budget->save();
+                // Update bet status and profit
+                $bet->update([
+                    'status' => $result['status'],
+                    'actual_profit' => $result['profit'],
+                    'resolved_at' => now(),
+                ]);
 
-                // Update bet's budget_after field
-                $bet->budget_after = $newBudget;
-                $bet->save();
-            }
+                // Update budget configuration usando BudgetHistory (método correcto)
+                if ($bet->budgetConfiguration) {
+                    $budget = $bet->budgetConfiguration;
+                    $oldBudget = $budget->current_budget;
+                    $newBudget = $oldBudget + $result['profit'];
+                    
+                    $this->line("   📊 Presupuesto: €{$oldBudget} → €" . number_format($newBudget, 2));
+                    
+                    $budget->update(['current_budget' => $newBudget]);
+                    $bet->update(['budget_after' => $newBudget]);
+
+                    // CREAR REGISTRO EN BUDGETHISTORY (método correcto)
+                    \App\Models\BudgetHistory::create([
+                        'budget_configuration_id' => $budget->id,
+                        'bet_id' => $bet->id,
+                        'amount' => $result['profit'],
+                        'balance_before' => $oldBudget,
+                        'balance_after' => $newBudget,
+                        'type' => $result['status'] === 'won' ? 'bet_won' : 'bet_lost',
+                        'description' => $result['status'] === 'won' ? 
+                            "Apuesta ganada: +" . number_format($result['profit'], 2) : 
+                            "Apuesta perdida: " . number_format($result['profit'], 2),
+                    ]);
+                }
+            });
         }
     }
 

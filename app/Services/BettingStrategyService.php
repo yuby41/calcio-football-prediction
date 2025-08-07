@@ -52,7 +52,7 @@ class BettingStrategyService
         $confidenceMultiplier = $this->getConfidenceMultiplier($confidence);
         $amount = $baseAmount * $sequence[$step] * $confidenceMultiplier;
 
-        return min($amount, $maxBetAmount);
+        return max(2, floor(min($amount, $maxBetAmount)));
     }
 
     private function calculateFibonacci(BudgetConfiguration $config, float $maxBetAmount): float
@@ -74,7 +74,7 @@ class BettingStrategyService
         }
 
         $amount = $baseAmount * $sequence[$step];
-        return min($amount, $maxBetAmount);
+        return max(2, floor(min($amount, $maxBetAmount)));
     }
 
     private function calculateMartingale(BudgetConfiguration $config, float $maxBetAmount): float
@@ -94,7 +94,7 @@ class BettingStrategyService
             $amount = $baseAmount;
         }
 
-        return min($amount, $maxBetAmount);
+        return max(2, floor(min($amount, $maxBetAmount)));
     }
 
     private function calculateFixed(BudgetConfiguration $config, float $maxBetAmount): float
@@ -115,7 +115,7 @@ class BettingStrategyService
         $percentage = $basePercentage * $confidenceMultiplier;
         
         $amount = ($config->current_budget * $percentage) / 100;
-        return min($amount, $maxBetAmount);
+        return max(2, floor(min($amount, $maxBetAmount)));
     }
 
     private function getConfidenceMultiplier(float $confidence): float
@@ -128,23 +128,35 @@ class BettingStrategyService
         return 0.5 + (($confidence - 60) / 30) * 1.5;
     }
 
+    /**
+     * DEPRECATED: Este método genera odds irreales
+     * @deprecated Use FootballApiOddsService::getRealOddsForMatch() instead
+     * @param string $betType
+     * @param FootballMatch $match
+     * @return float
+     */
     public function getRecommendedOdds(string $betType, FootballMatch $match): float
     {
-        // DEPRECATED: Este método genera odds irreales
-        // Usar FootballApiOddsService::getRealOddsForMatch() en su lugar
+        \Log::warning('DEPRECATED: BettingStrategyService::getRecommendedOdds() called', [
+            'bet_type' => $betType,
+            'match_id' => $match->id,
+            'caller' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? 'unknown'
+        ]);
         
-        if (!$match->prediction) return 2.0;
-
-        return match($betType) {
-            'home_win' => $this->probabilityToOdds($match->prediction->home_win_probability),
-            'away_win' => $this->probabilityToOdds($match->prediction->away_win_probability),
-            'draw' => $this->probabilityToOdds($match->prediction->draw_probability),
-            'over_2_5' => $this->probabilityToOdds($match->prediction->over_2_5_probability),
-            'under_2_5' => $this->probabilityToOdds($match->prediction->under_2_5_probability),
-            'both_teams_score' => $this->probabilityToOdds($match->prediction->both_teams_score_probability),
-            'over_0_5_first_half' => $this->probabilityToOdds($match->prediction->first_half_over_0_5_probability),
-            default => 2.0,
-        };
+        // CRITICAL FIX: Return reasonable fallback odds without database predictions
+        // This prevents system failures when predictions are missing
+        
+        $fallbackOdds = [
+            'home_win' => 2.50,
+            'away_win' => 3.20,
+            'draw' => 3.00,
+            'over_2_5' => 1.85,
+            'under_2_5' => 1.95,
+            'both_teams_score' => 1.70,
+            'over_0_5_first_half' => 1.30,
+        ];
+        
+        return $fallbackOdds[$betType] ?? 2.0;
     }
 
     private function probabilityToOdds(float $probability): float
@@ -211,33 +223,100 @@ class BettingStrategyService
 
     public function resolveBet(Bet $bet): void
     {
-        if ($bet->status !== 'pending') return;
-
-        $result = $bet->calculateResult();
-        $bet->update([
-            'status' => $result['status'],
-            'actual_profit' => $result['profit'],
-            'resolved_at' => now(),
-        ]);
-
-        $config = $bet->budgetConfiguration;
-        $newBudget = $config->current_budget + ($bet->amount + $result['profit']);
+        // CRITICAL FIX: Add distributed locking to prevent race conditions
+        $lockKey = "bet_resolution_{$bet->id}";
+        $lockTimeout = 30; // 30 seconds
         
-        $config->update(['current_budget' => $newBudget]);
-        $bet->update(['budget_after' => $newBudget]);
+        if (!\Cache::lock($lockKey, $lockTimeout)->get()) {
+            \Log::warning("Could not acquire lock for bet resolution", ['bet_id' => $bet->id]);
+            throw new \Exception("Bet resolution already in progress");
+        }
+        
+        try {
+            // PROTECCIÓN 1: Verificar si ya fue resuelta
+            if ($bet->status !== 'pending') {
+                \Log::warning("Intento de resolver apuesta ya resuelta", ['bet_id' => $bet->id, 'status' => $bet->status]);
+                return;
+            }
+            
+            // PROTECCIÓN 2: Verificar si ya existe entrada en BudgetHistory para resolución
+            $existingHistory = BudgetHistory::where('bet_id', $bet->id)
+                ->whereIn('type', ['bet_won', 'bet_lost'])
+                ->exists();
+                
+            if ($existingHistory) {
+                \Log::warning("Intento de resolver apuesta que ya tiene historial", ['bet_id' => $bet->id]);
+                return;
+            }
 
-        // Registrar en historial
-        BudgetHistory::create([
-            'budget_configuration_id' => $config->id,
-            'bet_id' => $bet->id,
-            'amount' => $bet->amount + $result['profit'],
-            'balance_before' => $config->current_budget - ($bet->amount + $result['profit']),
-            'balance_after' => $newBudget,
-            'type' => $result['status'] === 'won' ? 'bet_won' : 'bet_lost',
-            'description' => $result['status'] === 'won' ? 
-                "Apuesta ganada: +{$result['profit']}" : 
-                "Apuesta perdida: {$result['profit']}",
-        ]);
+            // PROTECCIÓN 3: Usar transacción para atomicidad con rollback logic
+            \DB::transaction(function() use ($bet) {
+            // Verificar nuevamente dentro de la transacción
+            $bet->refresh();
+            if ($bet->status !== 'pending') {
+                \Log::warning("Apuesta resuelta por otro proceso durante transacción", ['bet_id' => $bet->id]);
+                return;
+            }
+            
+            $result = $bet->calculateResult();
+            
+            $bet->update([
+                'status' => $result['status'],
+                'actual_profit' => $result['profit'],
+                'resolved_at' => now(),
+            ]);
+
+            $config = $bet->budgetConfiguration;
+            $oldBudget = $config->current_budget;
+            
+            // CORRECTED: Handle bet resolution correctly
+            // When bet is placed: amount is deducted from budget
+            // When bet wins: return original amount + profit to budget  
+            // When bet loses: no additional change (amount stays deducted)
+            if ($result['status'] === 'won') {
+                // Return original bet amount + profit to budget
+                $newBudget = $oldBudget + $bet->amount + $result['profit'];
+            } else {
+                // For lost bets, no change needed - amount was already deducted when placed
+                $newBudget = $oldBudget;
+            }
+            
+            $config->update(['current_budget' => $newBudget]);
+            $bet->update(['budget_after' => $newBudget]);
+
+            // Registrar en historial
+            BudgetHistory::create([
+                'budget_configuration_id' => $config->id,
+                'bet_id' => $bet->id,
+                'amount' => $result['profit'],
+                'balance_before' => $oldBudget,
+                'balance_after' => $newBudget,
+                'type' => $result['status'] === 'won' ? 'bet_won' : 'bet_lost',
+                'description' => $result['status'] === 'won' ? 
+                    "Apuesta ganada: +" . number_format($result['profit'], 2) : 
+                    "Apuesta perdida: " . number_format($result['profit'], 2),
+            ]);
+            
+            \Log::info("Apuesta resuelta correctamente", [
+                'bet_id' => $bet->id,
+                'result' => $result['status'],
+                'profit' => $result['profit'],
+                'old_budget' => $oldBudget,
+                'new_budget' => $newBudget
+            ]);
+            });
+            
+        } catch (\Exception $e) {
+            \Log::error("Error resolving bet", [
+                'bet_id' => $bet->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        } finally {
+            // CRITICAL: Always release the lock
+            \Cache::lock($lockKey)->release();
+        }
     }
 
     public function getStrategyPerformance(BudgetConfiguration $config, int $days = 30): array

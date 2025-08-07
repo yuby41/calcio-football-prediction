@@ -25,6 +25,7 @@ class SimpleBettingRecommendationService
                     mp.both_teams_score_probability,
                     mp.over_2_5_probability,
                     mp.under_2_5_probability,
+                    mp.first_half_over_0_5_probability,
                     mp.home_goals_prediction,
                     mp.away_goals_prediction,
                     mp.confidence_score,
@@ -33,11 +34,11 @@ class SimpleBettingRecommendationService
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
                 JOIN match_predictions mp ON m.id = mp.match_id
-                WHERE m.status = 'scheduled'
-                AND m.match_date >= NOW()
+                WHERE m.status IN ('scheduled', 'live')
+                AND m.match_date >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                 AND m.match_date <= DATE_ADD(NOW(), INTERVAL 7 DAY)
-                ORDER BY m.match_date ASC
-                LIMIT 10
+                ORDER BY CASE WHEN m.status = 'live' THEN 0 ELSE 1 END, m.match_date ASC
+                LIMIT 15
             ");
 
             $recommendations = [];
@@ -115,10 +116,16 @@ class SimpleBettingRecommendationService
                 'label' => 'Menos de 2.5 Goles',
                 'description' => 'Menos de 2.5 goles en total'
             ],
+            'over_0_5_first_half' => [
+                'probability' => $match->first_half_over_0_5_probability,
+                'label' => 'Over 0.5 1T',
+                'description' => 'Al menos 1 gol en el primer tiempo'
+            ],
         ];
 
         foreach ($betTypes as $betType => $info) {
-            if (!$info['probability']) continue;
+            // CRITICAL FIX: Skip if probability is null, 0, or empty, but allow valid small probabilities
+            if ($info['probability'] === null || $info['probability'] === '' || (float)$info['probability'] <= 0) continue;
 
             $confidence = $info['probability'] * 100;
             
@@ -181,7 +188,7 @@ class SimpleBettingRecommendationService
             'description' => $betInfo['description'],
             'confidence' => round($confidence, 1),
             'estimated_odds' => round($estimatedOdds, 2),
-            'recommended_amount' => round($recommendedAmount, 2),
+            'recommended_amount' => (int)$recommendedAmount,
             'potential_profit' => round($potentialProfit, 2),
             'recommendation_level' => $recommendationLevel,
             'strategy_fit' => $strategyFit,

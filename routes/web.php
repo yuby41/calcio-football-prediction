@@ -28,16 +28,41 @@ Route::prefix('budget')->name('budget.')->group(function () {
     Route::get('/{budget}/edit', [App\Http\Controllers\BudgetController::class, 'edit'])->name('edit');
     Route::put('/{budget}', [App\Http\Controllers\BudgetController::class, 'update'])->name('update');
     Route::delete('/{budget}', [App\Http\Controllers\BudgetController::class, 'destroy'])->name('destroy');
-    Route::get('/{budget}/recommendations', [App\Http\Controllers\BudgetController::class, 'recommendations'])->name('recommendations');
-    Route::post('/{budget}/bet', [App\Http\Controllers\BudgetController::class, 'placeBet'])->name('place-bet');
+    
+    // Protected routes that require subscription access
+    Route::middleware('subscription.access')->group(function () {
+        Route::get('/{budget}/recommendations', [App\Http\Controllers\BudgetController::class, 'recommendations'])->name('recommendations');
+        Route::post('/{budget}/bet', [App\Http\Controllers\BudgetController::class, 'placeBet'])->name('place-bet');
+        Route::get('/{budget}/opportunities', [App\Http\Controllers\BudgetController::class, 'opportunities'])->name('opportunities');
+    });
+    
     Route::post('/{budget}/resolve', [App\Http\Controllers\BudgetController::class, 'resolveBets'])->name('resolve-bets');
     Route::get('/{budget}/chart-data', [App\Http\Controllers\BudgetController::class, 'chartData'])->name('chart-data');
-    Route::get('/{budget}/opportunities', [App\Http\Controllers\BudgetController::class, 'opportunities'])->name('opportunities');
     Route::delete('/{budget}/delete-bet/{bet}', [App\Http\Controllers\BudgetController::class, 'deleteBet'])->name('delete-bet');
     Route::delete('/{budget}/delete-multiple-bets', [App\Http\Controllers\BudgetController::class, 'deleteMultipleBets'])->name('delete-multiple-bets');
     Route::get('/{budget}/check-integrity', [App\Http\Controllers\BudgetController::class, 'checkIntegrity'])->name('check-integrity');
     Route::post('/{budget}/recalculate-history', [App\Http\Controllers\BudgetController::class, 'recalculateHistory'])->name('recalculate-history');
 });
+
+// Subscription routes
+Route::prefix('subscription')->name('subscription.')->group(function () {
+    // Public routes
+    Route::get('/plans', [App\Http\Controllers\Auth\SubscriptionController::class, 'index'])->name('index');
+    
+    // Authenticated routes
+    Route::middleware('auth')->group(function () {
+        Route::get('/my-plans', [App\Http\Controllers\Auth\SubscriptionController::class, 'plans'])->name('plans');
+        Route::get('/current', [App\Http\Controllers\Auth\SubscriptionController::class, 'show'])->name('show');
+        Route::get('/checkout/{planSlug}', [App\Http\Controllers\Auth\SubscriptionController::class, 'checkout'])->name('checkout');
+        Route::post('/subscribe/{planSlug}', [App\Http\Controllers\Auth\SubscriptionController::class, 'subscribe'])->name('subscribe');
+        Route::post('/cancel', [App\Http\Controllers\Auth\SubscriptionController::class, 'cancel'])->name('cancel');
+        Route::post('/change-plan/{planSlug}', [App\Http\Controllers\Auth\SubscriptionController::class, 'changePlan'])->name('change-plan');
+        Route::get('/api/remaining-picks', [App\Http\Controllers\Auth\SubscriptionController::class, 'remainingPicks'])->name('api.remaining-picks');
+    });
+});
+
+// Authentication routes
+Auth::routes();
 
 // API Routes for live updates
 Route::prefix('api')->group(function () {
@@ -46,3 +71,5 @@ Route::prefix('api')->group(function () {
     Route::get('/live/live-matches', [App\Http\Controllers\Api\LiveUpdatesController::class, 'liveMatches'])->name('api.live.live-matches');
     Route::get('/health', [App\Http\Controllers\Api\LiveUpdatesController::class, 'health'])->name('api.health');
 });
+
+Auth::routes();

@@ -321,11 +321,11 @@ function renderSingleRecommendation(rec, matchId, isLive = false) {
                 </div>
                 <div>
                     <div class="text-xs text-gray-500">Cantidad</div>
-                    <div class="font-bold text-lg text-purple-600">€${rec.recommended_amount}</div>
+                    <div class="font-bold text-lg text-purple-600">€${parseInt(rec.recommended_amount)}</div>
                 </div>
                 <div>
                     <div class="text-xs text-gray-500">Ganancia</div>
-                    <div class="font-bold text-lg text-green-600">€${rec.potential_profit}</div>
+                    <div class="font-bold text-lg text-green-600">€${parseFloat(rec.potential_profit).toFixed(2)}</div>
                 </div>
             </div>
             
@@ -346,7 +346,7 @@ function renderSingleRecommendation(rec, matchId, isLive = false) {
             <div class="flex space-x-3">
                 <button onclick="placeBet('${matchId}', '${rec.bet_type}', ${rec.odds}, ${rec.recommended_amount})"
                         class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    Apostar €${rec.recommended_amount}
+                    Apostar €${parseInt(rec.recommended_amount)}
                 </button>
                 <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.odds}, ${rec.confidence}, ${isLive})"
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
@@ -448,11 +448,11 @@ function renderSimpleRecommendation(rec, index) {
                     </div>
                     <div>
                         <div class="text-xs text-gray-500">Cantidad recomendada</div>
-                        <div class="font-bold text-lg text-purple-600">€${rec.recommended_amount}</div>
+                        <div class="font-bold text-lg text-purple-600">€${parseInt(rec.recommended_amount)}</div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-500">Ganancia potencial</div>
-                        <div class="font-bold text-lg text-green-600">€${rec.potential_profit}</div>
+                        <div class="font-bold text-lg text-green-600">€${parseFloat(rec.potential_profit).toFixed(2)}</div>
                     </div>
                 </div>
                 
@@ -472,7 +472,7 @@ function renderSimpleRecommendation(rec, index) {
                 <div class="flex space-x-3">
                     <button onclick="placeBet('${rec.match_id}', '${rec.bet_type}', ${rec.odds}, ${rec.recommended_amount})"
                             class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                        Apostar €${rec.recommended_amount}
+                        Apostar €${parseInt(rec.recommended_amount)}
                     </button>
                     <button onclick="customBet('${rec.match_id}', '${rec.bet_type}', ${rec.odds}, ${rec.confidence})"
                             class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
@@ -610,11 +610,11 @@ function renderRecommendation(rec, matchId, isLive = false) {
                 </div>
                 <div>
                     <div class="text-xs text-gray-500">Cantidad recomendada</div>
-                    <div class="font-bold text-lg text-purple-600">€${rec.recommended_amount}</div>
+                    <div class="font-bold text-lg text-purple-600">€${parseInt(rec.recommended_amount)}</div>
                 </div>
                 <div>
                     <div class="text-xs text-gray-500">Ganancia potencial</div>
-                    <div class="font-bold text-lg text-green-600">€${rec.potential_profit}</div>
+                    <div class="font-bold text-lg text-green-600">€${parseFloat(rec.potential_profit).toFixed(2)}</div>
                 </div>
             </div>
             
@@ -652,7 +652,7 @@ function renderRecommendation(rec, matchId, isLive = false) {
             <div class="flex space-x-3">
                 <button onclick="placeBet('${matchId}', '${rec.bet_type}', ${rec.estimated_odds}, ${rec.recommended_amount})"
                         class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    Apostar €${rec.recommended_amount}
+                    Apostar €${parseInt(rec.recommended_amount)}
                 </button>
                 <button onclick="customBet('${matchId}', '${rec.bet_type}', ${rec.estimated_odds}, ${rec.confidence}, ${isLive})"
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50">
@@ -692,7 +692,7 @@ function placeBet(matchId, betType, odds, amount) {
         .then(data => {
             if (data.success) {
                 // Mostrar notificación de éxito
-                showSuccessNotification('✅ Apuesta exitosa: €' + amount + ' apostados. Nuevo balance: €' + data.new_balance.toFixed(2));
+                showSuccessNotification('✅ Apuesta exitosa: €' + parseInt(amount) + ' apostados. Nuevo balance: €' + data.new_balance.toFixed(2));
                 
                 // Actualizar balance mostrado
                 updateDisplayedBalance(data.new_balance);

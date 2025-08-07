@@ -31,12 +31,18 @@ class FootballApiOddsService
             $apiOdds = $this->getOddsFromFootballApiWithTimeout($match, 5); // 5 second timeout
             
             if (!empty($apiOdds)) {
-                Log::info('Using Football API odds for match', [
+                // Merge API odds with fallback odds to ensure all bet types are available
+                $mergedOdds = array_merge($fallbackOdds, $apiOdds);
+                
+                Log::info('Using merged API + fallback odds for match', [
                     'match_id' => $match->id,
-                    'odds_source' => $apiOdds['source'] ?? 'api',
-                    'odds_count' => count($apiOdds)
+                    'api_odds_source' => $apiOdds['source'] ?? 'api',
+                    'api_odds_count' => count($apiOdds),
+                    'fallback_odds_count' => count($fallbackOdds),
+                    'merged_odds_count' => count($mergedOdds),
+                    'first_half_available' => isset($mergedOdds['over_0_5_first_half']) ? 'yes' : 'no'
                 ]);
-                return $apiOdds;
+                return $mergedOdds;
             }
         } catch (\Exception $e) {
             Log::warning('API odds failed, using fallback', [

@@ -96,19 +96,35 @@ class TrainEnhancedMLModels extends Command
             }
         }
         
-        // Check Python dependencies
+        // SECURITY FIX: Check Python dependencies with validated path
+        if (!$this->isValidMlPath($mlPath)) {
+            $this->error("Invalid ML path detected");
+            return false;
+        }
+        
         $dependencyCheck = new Process([
             'python3', '-c', 
             'import pandas, numpy, sklearn, xgboost, lightgbm, joblib; print("Dependencies OK")'
         ], $mlPath);
         
+        $dependencyCheck->setTimeout(30); // Shorter timeout
         $dependencyCheck->run();
         
         if (!$dependencyCheck->isSuccessful()) {
             $this->warn("⚠️  Algunas dependencias de Python pueden estar faltando");
+            
+            // SECURITY: Validate requirements.txt exists and is safe
+            $requirementsPath = $mlPath . '/requirements.txt';
+            if (!$this->validateRequirementsFile($requirementsPath)) {
+                $this->error("Invalid or unsafe requirements.txt file");
+                return false;
+            }
+            
             $this->info("Ejecutando: pip install -r requirements.txt");
             
-            $installProcess = new Process(['pip', 'install', '-r', 'requirements.txt'], $mlPath);
+            $installProcess = new Process([
+                'pip', 'install', '-r', 'requirements.txt', '--user', '--no-cache-dir'
+            ], $mlPath);
             $installProcess->setTimeout(300); // 5 minutes timeout
             $installProcess->run();
             
@@ -153,12 +169,25 @@ class TrainEnhancedMLModels extends Command
         $progressBar->setMessage('Iniciando entrenamiento...');
         $progressBar->start();
         
-        // Train enhanced models
+        // SECURITY FIX: Train enhanced models with path validation
+        if (!$this->isValidMlPath($mlPath)) {
+            $this->error("Invalid ML path for training");
+            return null;
+        }
+        
+        // Validate Python script exists and is safe
+        $scriptPath = $mlPath . '/enhanced_football_predictor.py';
+        if (!$this->validatePythonScript($scriptPath)) {
+            $this->error("Python script validation failed");
+            return null;
+        }
+        
         $trainingProcess = new Process([
             'python3', 'enhanced_football_predictor.py', 'train'
         ], $mlPath);
         
         $trainingProcess->setTimeout(1800); // 30 minutes timeout
+        $trainingProcess->setEnv(['PYTHONPATH' => $mlPath]); // Set safe Python path
         
         $output = '';
         $trainingProcess->run(function ($type, $buffer) use (&$output, $progressBar) {
@@ -421,5 +450,117 @@ class TrainEnhancedMLModels extends Command
         $this->info("🔄 Restaurando modelos anteriores...");
         // Implementation for restoring backup models
         $this->info("✅ Modelos anteriores restaurados");
+    }
+    
+    /**
+     * SECURITY: Validate ML path is within expected boundaries
+     */
+    private function isValidMlPath(string $path): bool
+    {
+        $basePath = base_path('ml');
+        $realPath = realpath($path);
+        $realBasePath = realpath($basePath);
+        
+        // Ensure path exists and is within ml directory
+        return $realPath && $realBasePath && strpos($realPath, $realBasePath) === 0;
+    }
+    
+    /**
+     * SECURITY: Validate requirements.txt file is safe
+     */
+    private function validateRequirementsFile(string $filePath): bool
+    {
+        if (!file_exists($filePath) || !is_readable($filePath)) {
+            return false;
+        }
+        
+        $content = file_get_contents($filePath);
+        if ($content === false) {
+            return false;
+        }
+        
+        // Check for suspicious patterns
+        $dangerousPatterns = [
+            'subprocess',
+            'os.system',
+            'eval(',
+            'exec(',
+            '__import__',
+            'http://',
+            'https://',
+            'ftp://',
+            '../',
+            '~/',
+            '/etc/',
+            '/bin/',
+            '/usr/'
+        ];
+        
+        foreach ($dangerousPatterns as $pattern) {
+            if (stripos($content, $pattern) !== false) {
+                Log::warning("Suspicious pattern found in requirements.txt", [
+                    'pattern' => $pattern,
+                    'file' => $filePath
+                ]);
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * SECURITY: Validate Python script is safe to execute
+     */
+    private function validatePythonScript(string $scriptPath): bool
+    {
+        if (!file_exists($scriptPath) || !is_readable($scriptPath)) {
+            return false;
+        }
+        
+        // Check file size (prevent extremely large files)
+        $fileSize = filesize($scriptPath);
+        if ($fileSize === false || $fileSize > 1024 * 1024) { // 1MB limit
+            Log::warning("Python script too large or unreadable", [
+                'file' => $scriptPath,
+                'size' => $fileSize
+            ]);
+            return false;
+        }
+        
+        // Basic content validation
+        $content = file_get_contents($scriptPath, false, null, 0, 10000); // Read first 10KB
+        if ($content === false) {
+            return false;
+        }
+        
+        // Check for extremely dangerous patterns
+        $dangerousPatterns = [
+            'os.system(',
+            'subprocess.call(',
+            'subprocess.run(',
+            'eval(',
+            'exec(',
+            '__import__("os")',
+            'import os',
+            'from os import',
+            'socket.',
+            'urllib.',
+            'requests.',
+            'http.',
+            'ftp'
+        ];
+        
+        foreach ($dangerousPatterns as $pattern) {
+            if (stripos($content, $pattern) !== false) {
+                Log::warning("Dangerous pattern found in Python script", [
+                    'pattern' => $pattern,
+                    'file' => $scriptPath
+                ]);
+                return false;
+            }
+        }
+        
+        return true;
     }
 }
