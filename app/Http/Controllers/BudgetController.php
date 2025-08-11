@@ -184,10 +184,48 @@ class BudgetController extends Controller
                 $confidence
             );
 
+            // CRITICAL FIX: Enhanced budget validation including target profit
+            if ($budget->hasReachedTargetProfit()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '¡Objetivo de ganancia alcanzado! Sistema detenido para proteger beneficios.'
+                ], 422);
+            }
+            
+            if (!$budget->canBet()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No se pueden realizar apuestas en este momento.'
+                ], 422);
+            }
+
+            if ($budget->isExhausted()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Presupuesto por debajo del límite mínimo. Sistema de apuestas desactivado.'
+                ], 422);
+            }
+
+            // Check if amount is 0 (indicating strategy says no betting)
+            if ($amount <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Presupuesto insuficiente para apostar según la estrategia actual.'
+                ], 422);
+            }
+
             if ($amount > $budget->current_budget) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Fondos insuficientes.'
+                ], 422);
+            }
+
+            // Check if bet would exhaust budget completely
+            if (($budget->current_budget - $amount) < 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Esta apuesta agotaría completamente el presupuesto.'
                 ], 422);
             }
 
@@ -260,45 +298,28 @@ class BudgetController extends Controller
         $cacheKey = "budget_chart_{$budget->id}_{$budget->updated_at->timestamp}";
         
         return \Cache::remember($cacheKey, 1800, function() use ($budget) { // 30 minutos de cache
-            // CRITICAL FIX: Calculate budget evolution correctly using bets instead of corrupted history
-            $bets = $budget->bets()
-                ->whereIn('status', ['won', 'lost', 'pending'])
-                ->orderBy('placed_at')
+            // Evolución del budget basada en el historial
+            $history = $budget->budgetHistory()
+                ->orderBy('created_at')
                 ->get();
 
-            $dates = [];
-            $balances = [];
-            
-            // Agregar punto inicial
-            $dates[] = $budget->created_at->format('d/m');
-            $currentBalance = (float) $budget->initial_budget;
-            $balances[] = $currentBalance;
-            
-            // Procesar apuestas para recalcular balance correcto
-            $dailyBets = $bets->groupBy(function($bet) {
-                return $bet->placed_at ? $bet->placed_at->format('Y-m-d') : $bet->created_at->format('Y-m-d');
-            });
+        $dates = [];
+        $balances = [];
+        
+        // Agregar punto inicial
+        $dates[] = $budget->created_at->format('d/m');
+        $balances[] = (float) $budget->initial_budget;
+        
+        // Procesar historial día por día
+        $dailyHistory = $history->groupBy(function($item) {
+            return $item->created_at->format('Y-m-d');
+        });
 
-            foreach ($dailyBets as $date => $dayBets) {
-                $dayStartBalance = $currentBalance;
-                
-                foreach ($dayBets as $bet) {
-                    // Deduct bet amount when placed
-                    $currentBalance -= $bet->amount;
-                    
-                    // Add winnings if bet is resolved and won
-                    if ($bet->status === 'won' && $bet->actual_profit) {
-                        $currentBalance += $bet->actual_profit + $bet->amount; // profit + original amount
-                    }
-                    // For lost bets, amount is already deducted, no additional action needed
-                }
-                
-                // Only add to chart if there was actual movement
-                if (abs($currentBalance - $dayStartBalance) > 0.01) {
-                    $dates[] = \Carbon\Carbon::parse($date)->format('d/m');
-                    $balances[] = round($currentBalance, 2);
-                }
-            }
+        foreach ($dailyHistory as $date => $records) {
+            $lastRecord = $records->last();
+            $dates[] = \Carbon\Carbon::parse($date)->format('d/m');
+            $balances[] = (float) $lastRecord->balance_after;
+        }
         
         // Si no hay historial, usar balance actual
         if (empty($dates) || count($dates) === 1) {
@@ -324,6 +345,9 @@ class BudgetController extends Controller
         $monthlyPerformance = $budget->bets()
             ->whereIn('status', ['won', 'lost'])
             ->get()
+            ->filter(function($bet) {
+                return $bet->resolved_at !== null;
+            })
             ->groupBy(function($bet) {
                 return $bet->resolved_at->format('Y-m');
             })
@@ -353,27 +377,27 @@ class BudgetController extends Controller
         $cacheKey = "budget_opportunities_{$budget->id}_" . now()->format('Y-m-d-H');
         
         return \Cache::remember($cacheKey, 900, function() use ($budget) { // 15 minutos de cache
-            // Incluir tanto partidos programados como partidos EN VIVO (excluyendo partidos terminados)
-            $upcomingMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
-                ->whereIn('status', ['scheduled', 'live'])
-                ->whereNotIn('status', ['finished', 'cancelled', 'postponed', 'suspended']) // Excluir partidos terminados/cancelados
-                ->where(function($query) {
-                    // Partidos programados para los próximos 7 días
-                    $query->where('status', 'scheduled')
-                          ->where('match_date', '>=', now())
-                          ->where('match_date', '<=', now()->addDays(7));
-                })
-                ->orWhere(function($query) {
-                    // Partidos EN VIVO (comenzaron hoy o ayer pero aún no terminaron)
-                    $query->where('status', 'live')
-                          ->where('match_date', '>=', now()->subDay())
-                          ->where('match_date', '<=', now()->addHours(3)); // Max 3h para partidos en vivo
-                })
+            // Obtener partidos en vivo y programados por separado para asegurar cobertura
+            $liveMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+                ->where('status', 'live')
+                ->where('match_date', '>=', now()->subDay())
+                ->where('match_date', '<=', now()->addHours(3))
                 ->whereHas('prediction')
-                ->orderByRaw("CASE WHEN status = 'live' THEN 0 ELSE 1 END") // Priorizar partidos en vivo
                 ->orderBy('match_date')
-                ->limit(50) // Limitar resultados para mejorar performance
+                ->limit(50)
                 ->get();
+                
+            $scheduledMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+                ->where('status', 'scheduled')
+                ->where('match_date', '>=', now())
+                ->where('match_date', '<=', now()->addDays(7))
+                ->whereHas('prediction')
+                ->orderBy('match_date')
+                ->limit(50)
+                ->get();
+                
+            // Combinar ambas colecciones
+            $upcomingMatches = $liveMatches->concat($scheduledMatches);
 
         $opportunities = [];
         $filteredMatches = 0;
@@ -473,6 +497,7 @@ class BudgetController extends Controller
                         'match_name' => "{$match->homeTeam->name} vs {$match->awayTeam->name}",
                         'match_date' => $match->match_date->format('d/m/Y H:i'),
                         'league' => $match->league,
+                        'country' => $this->getCountryFromLeague($match->league),
                         'season' => $match->season,
                         'round' => $match->round,
                         'home_team' => [
@@ -502,6 +527,9 @@ class BudgetController extends Controller
                             'home_goals_prediction' => $match->prediction->home_goals_prediction ?? 0,
                             'away_goals_prediction' => $match->prediction->away_goals_prediction ?? 0,
                             'total_goals_prediction' => ($match->prediction->home_goals_prediction ?? 0) + ($match->prediction->away_goals_prediction ?? 0),
+                            'both_teams_score_probability' => ($match->prediction->both_teams_score_probability ?? 0) * 100,
+                            'both_teams_score_prediction' => ($match->prediction->both_teams_score_probability ?? 0) > 0.5 ? 'Sí' : 'No',
+                            'both_teams_score_confident' => $this->isBothTeamsScoreConfident($match->prediction, $budget->min_confidence),
                             'model_version' => $match->prediction->model_version ?? 'unknown'
                         ],
                         'analysis' => [
@@ -527,6 +555,7 @@ class BudgetController extends Controller
                     'match_name' => $opportunity['match_name'],
                     'match_date' => $opportunity['match_date'],
                     'league' => $opportunity['league'],
+                    'country' => $opportunity['country'],
                     'season' => $opportunity['season'],
                     'round' => $opportunity['round'],
                     'home_team' => $opportunity['home_team'],
@@ -551,7 +580,8 @@ class BudgetController extends Controller
                 'odds' => $opportunity['odds'],
                 'odds_source' => $opportunity['odds_source'] ?? 'unknown',
                 'potential_profit' => $opportunity['potential_profit'],
-                'analysis' => $opportunity['analysis']
+                'analysis' => $opportunity['analysis'],
+                'prediction_details' => $opportunity['prediction_details']
             ];
             
             // Actualizar la confianza máxima para ordenamiento
@@ -560,38 +590,64 @@ class BudgetController extends Controller
             }
         }
 
-        // Convertir a array indexado y ordenar
+        // Convertir a array indexado y separar live vs scheduled
         $groupedArray = array_values($groupedOpportunities);
         
-        // Ordenar: PRIMERO partidos en vivo, DESPUÉS por calidad de recomendaciones
-        usort($groupedArray, function($a, $b) {
-            // 1. PRIORIDAD ABSOLUTA: Partidos en vivo primero
-            if ($a['is_live'] && !$b['is_live']) {
-                return -1; // A (live) va antes que B (scheduled)
-            }
-            if (!$a['is_live'] && $b['is_live']) {
-                return 1; // B (live) va antes que A (scheduled)
-            }
-            
-            // 2. Si ambos tienen el mismo status (ambos live o ambos scheduled), ordenar por score
+        // Separar partidos en vivo de programados
+        $liveMatches = array_filter($groupedArray, fn($match) => $match['is_live']);
+        $scheduledMatches = array_filter($groupedArray, fn($match) => !$match['is_live']);
+        
+        // Ordenar cada grupo por score de calidad
+        usort($liveMatches, function($a, $b) {
             $scoreA = $this->calculateMatchRecommendationScore($a);
             $scoreB = $this->calculateMatchRecommendationScore($b);
-            
-            return $scoreB <=> $scoreA; // Ordenar de mayor a menor score
+            return $scoreB <=> $scoreA; // Mayor a menor
         });
+        
+        usort($scheduledMatches, function($a, $b) {
+            $scoreA = $this->calculateMatchRecommendationScore($a);
+            $scoreB = $this->calculateMatchRecommendationScore($b);
+            return $scoreB <=> $scoreA; // Mayor a menor
+        });
+        
+        // Tomar los mejores: 8 live + 7 scheduled
+        $topLiveMatches = array_slice($liveMatches, 0, 8);
+        $topScheduledMatches = array_slice($scheduledMatches, 0, 7);
+        
+        // Combinar: live primero, luego scheduled
+        $finalMatches = array_merge($topLiveMatches, $topScheduledMatches);
 
         // Log de resumen del filtrado
-        $totalValidRecommendations = array_sum(array_map(fn($match) => count($match['recommendations']), $groupedArray));
+        $totalValidRecommendations = array_sum(array_map(fn($match) => count($match['recommendations']), $finalMatches));
+        
+        // Log scores of top matches for debugging
+        $topLiveScores = array_slice(array_map(fn($m) => [
+            'match' => $m['match_name'], 
+            'score' => $this->calculateMatchRecommendationScore($m),
+            'confidence' => $m['max_confidence']
+        ], $liveMatches), 0, 3);
+        
+        $topScheduledScores = array_slice(array_map(fn($m) => [
+            'match' => $m['match_name'], 
+            'score' => $this->calculateMatchRecommendationScore($m),
+            'confidence' => $m['max_confidence']
+        ], $scheduledMatches), 0, 3);
+        
         \Log::info('Resumen filtrado de recomendaciones IA', [
             'total_matches_analyzed' => $upcomingMatches->count(),
             'filtered_matches' => $filteredMatches,
             'filtered_individual_bets' => $filteredBets,
-            'valid_matches_with_bets' => count($groupedArray),
+            'live_matches_available' => count($liveMatches),
+            'scheduled_matches_available' => count($scheduledMatches),
+            'top_live_matches_returned' => count($topLiveMatches),
+            'top_scheduled_matches_returned' => count($topScheduledMatches),
+            'total_final_matches' => count($finalMatches),
             'total_valid_recommendations' => $totalValidRecommendations,
-            'final_top_matches_returned' => min(15, count($groupedArray))
+            'top_live_samples' => $topLiveScores,
+            'top_scheduled_samples' => $topScheduledScores
         ]);
 
-            return array_slice($groupedArray, 0, 15); // Top 15 partidos (cada partido puede tener múltiples recomendaciones)
+            return $finalMatches; // 8 mejores live + 7 mejores scheduled
         }); // Cierre del Cache::remember
     }
 
@@ -1248,5 +1304,292 @@ class BudgetController extends Controller
     private function calculateUnder05Probability(FootballMatch $match): float
     {
         return 1 - $this->calculateOver05Probability($match);
+    }
+    
+    /**
+     * Mapea ligas a países para mostrar información geográfica
+     */
+    private function getCountryFromLeague(?string $league): string
+    {
+        if (!$league) return '';
+        
+        $leagueCountryMap = [
+            // España
+            'Primera Division' => 'España',
+            'La Liga' => 'España',
+            'Segunda Division' => 'España',
+            'Segunda División' => 'España',
+            
+            // Inglaterra  
+            'Premier League' => 'Inglaterra',
+            'Championship' => 'Inglaterra',
+            'League One' => 'Inglaterra',
+            'League Two' => 'Inglaterra',
+            'Non League Premier' => 'Inglaterra',
+            'National League' => 'Inglaterra',
+            
+            // Italia
+            'Serie A' => 'Italia',
+            'Serie B' => 'Italia',
+            'Serie C' => 'Italia',
+            'Serie D' => 'Italia',
+            'Coppa Italia' => 'Italia',
+            '3. Division' => 'Italia',
+            '4. Division' => 'Italia',
+            
+            // Alemania
+            'Bundesliga' => 'Alemania',
+            '2. Bundesliga' => 'Alemania',
+            'Regionalliga' => 'Alemania',
+            'Oberliga' => 'Alemania',
+            'U19 Bundesliga' => 'Alemania',
+            
+            // Francia
+            'Ligue 1' => 'Francia',
+            'Ligue 2' => 'Francia',
+            'National 1' => 'Francia',
+            
+            // Portugal
+            'Primeira Liga' => 'Portugal',
+            'Liga Portugal' => 'Portugal',
+            'II Liga' => 'Portugal',
+            'Liga Pro' => 'Portugal',
+            'Campeonato de Portugal' => 'Portugal',
+            
+            // Holanda
+            'Eredivisie' => 'Holanda',
+            'Eerste Divisie' => 'Holanda',
+            
+            // Argentina
+            'Liga Profesional Argentina' => 'Argentina',
+            'Liga Profesional' => 'Argentina',
+            'Primera División' => 'Argentina',
+            'Primera Nacional' => 'Argentina',
+            'Primera B' => 'Argentina',
+            'Primera C' => 'Argentina',
+            'Copa Argentina' => 'Argentina',
+            'Torneo Federal A' => 'Argentina',
+            
+            // Brasil
+            'Brasileirao Serie A' => 'Brasil',
+            'Serie A Brazil' => 'Brasil',
+            'Liga Pro Serie B' => 'Brasil',
+            'Brasileiro U17' => 'Brasil',
+            'Brasileiro U20 A' => 'Brasil',
+            'Brasileiro Women' => 'Brasil',
+            'Copa Do Brasil' => 'Brasil',
+            'Copa Paulista' => 'Brasil',
+            'Paulista' => 'Brasil',
+            'Carioca' => 'Brasil',
+            'Mineiro' => 'Brasil',
+            'Gaúcho' => 'Brasil',
+            'Baiano' => 'Brasil',
+            'Catarinense' => 'Brasil',
+            'Cearense' => 'Brasil',
+            'Goiano' => 'Brasil',
+            'Matogrossense' => 'Brasil',
+            'Paranaense' => 'Brasil',
+            'Paraibano' => 'Brasil',
+            'Potiguar' => 'Brasil',
+            'Capixaba' => 'Brasil',
+            'Brasiliense' => 'Brasil',
+            
+            // México
+            'Liga MX' => 'México',
+            'Liga MX Femenil' => 'México',
+            'Liga de Expansión MX' => 'México',
+            
+            // Colombia
+            'Liga BetPlay' => 'Colombia',
+            'Primera A' => 'Colombia',
+            'Copa Colombia' => 'Colombia',
+            
+            // Chile
+            'Primera Division Chile' => 'Chile',
+            
+            // Uruguay
+            'Primera Division Uruguay' => 'Uruguay',
+            'Copa Uruguay' => 'Uruguay',
+            
+            // Estados Unidos
+            'Major League Soccer' => 'Estados Unidos',
+            'MLS Next Pro' => 'Estados Unidos',
+            'USL Championship' => 'Estados Unidos',
+            'USL League One' => 'Estados Unidos',
+            'USL League Two' => 'Estados Unidos',
+            
+            // Canadá
+            'Canadian Premier League' => 'Canadá',
+            'Canadian Soccer League' => 'Canadá',
+            
+            // Australia
+            'Brisbane Premier League' => 'Australia',
+            'Capital Territory NPL' => 'Australia',
+            'New South Wales NPL' => 'Australia',
+            'Northern NSW NPL' => 'Australia',
+            'Queensland NPL' => 'Australia',
+            'Queensland Premier League' => 'Australia',
+            'South Australia NPL' => 'Australia',
+            'Tasmania NPL' => 'Australia',
+            'Victoria NPL' => 'Australia',
+            'Western Australia NPL' => 'Australia',
+            'Northern Territory Premier League' => 'Australia',
+            
+            // Países Bálticos
+            '1 Lyga' => 'Lituania',
+            'A Lyga' => 'Lituania',
+            'Optibet Liga' => 'Letonia',
+            'Meistriliiga' => 'Estonia',
+            'Esiliiga' => 'Estonia',
+            
+            // Nórdicos
+            '1. Deild' => 'Islandia',
+            'Úrvalsdeild' => 'Islandia',
+            'Meistaradeildin' => 'Islas Feroe',
+            '1. Division' => 'Dinamarca',
+            'DBU Pokalen' => 'Dinamarca',
+            'Allsvenskan' => 'Suecia',
+            'Superettan' => 'Suecia',
+            'Division 2' => 'Suecia',
+            'Ettan' => 'Suecia',
+            'Svenska Cupen' => 'Suecia',
+            'Damallsvenskan' => 'Suecia',
+            'Elitettan' => 'Suecia',
+            'Eliteserien' => 'Noruega',
+            'Toppserien' => 'Noruega',
+            'Veikkausliiga' => 'Finlandia',
+            'Ykkönen' => 'Finlandia',
+            'Kakkonen' => 'Finlandia',
+            'Kansallinen Liiga' => 'Finlandia',
+            
+            // Europa del Este
+            'Premier Liga' => 'Rusia',
+            'FNL' => 'Rusia',
+            'Ekstraklasa' => 'Polonia',
+            'Ekstraliga Women' => 'Polonia',
+            'I Liga' => 'Polonia',
+            'II Liga' => 'Polonia',
+            '1. Lig' => 'Turquía',
+            'Süper Lig' => 'Turquía',
+            '1. Liga' => 'Austria',
+            '2. Liga' => 'Austria',
+            'Regionalliga' => 'Austria',
+            'Czech Liga' => 'República Checa',
+            'Druha Liga' => 'República Checa',
+            'Fortuna Liga' => 'Eslovaquia',
+            'NB I' => 'Hungría',
+            'NB II' => 'Hungría',
+            'NB III' => 'Hungría',
+            'Magyar Kupa' => 'Hungría',
+            'Liga I' => 'Rumania',
+            'Liga II' => 'Rumania',
+            'Cupa României' => 'Rumania',
+            'Persha Liga' => 'Ucrania',
+            'Vysshaya Liga' => 'Bielorrusia',
+            
+            // Otros europeos
+            'Pro League' => 'Bélgica',
+            'Challenger Pro League' => 'Bélgica',
+            'Jupiler Pro League' => 'Bélgica',
+            'Super League' => 'Grecia',
+            'Challenge League' => 'Suiza',
+            'Erovnuli Liga' => 'Georgia',
+            'Primera Liga' => 'Serbia',
+            'Prva Liga' => 'Serbia',
+            'HNL' => 'Croacia',
+            'Superliga' => 'Serbia',
+            'Premijer Liga' => 'Bosnia',
+            '1. SNL' => 'Eslovenia',
+            '2. SNL' => 'Eslovenia',
+            'Virsliga' => 'Letonia',
+            'National Division' => 'Luxemburgo',
+            'Premiership' => 'Escocia',
+            'Championship' => 'Escocia',
+            'Premier Division' => 'Irlanda',
+            'First Division' => 'Irlanda',
+            
+            // Asia
+            'J1 League' => 'Japón',
+            'J2 League' => 'Japón',
+            'J3 League' => 'Japón',
+            'Japan Football League' => 'Japón',
+            'Emperor Cup' => 'Japón',
+            'WE League' => 'Japón',
+            'K League 1' => 'Corea del Sur',
+            'K League 2' => 'Corea del Sur',
+            'K3 League' => 'Corea del Sur',
+            
+            // Otros
+            'Liga Nacional' => 'Honduras',
+            'Liga Panameña de Fútbol' => 'Panamá',
+            'Liga Mayor' => 'Ecuador',
+            'Copa Ecuador' => 'Ecuador',
+            'Liga Femenina' => 'Venezuela',
+            'Copa Venezuela' => 'Venezuela',
+            'Division Profesional' => 'Paraguay',
+            'Copa de la División Profesional' => 'Paraguay',
+            'Liga 1' => 'Perú',
+            'Liga 3' => 'Perú',
+            'Kvindeliga' => 'Dinamarca',
+            'NWSL Women' => 'Estados Unidos',
+            'Ykkösliiga' => 'Finlandia',
+            'Supreme Division Women' => 'Inglaterra',
+            'Premiership Women' => 'Escocia',
+            'Ýokary Liga' => 'Turkmenistán'
+        ];
+        
+        // Buscar coincidencia exacta
+        if (isset($leagueCountryMap[$league])) {
+            return $leagueCountryMap[$league];
+        }
+        
+        // Buscar coincidencia parcial (más específica primero)
+        foreach ($leagueCountryMap as $leaguePattern => $country) {
+            if (stripos($league, $leaguePattern) !== false) {
+                return $country;
+            }
+        }
+        
+        // Buscar patrones específicos para casos especiales
+        $specialPatterns = [
+            '/^3\.\s*Division/i' => 'Italia',
+            '/^4\.\s*Division/i' => 'Italia', 
+            '/^2\.\s*Division/i' => 'Inglaterra',
+            '/^1\.\s*Division/i' => 'Dinamarca',
+            '/Liga\s*[0-9]/i' => 'Austria',
+            '/Bundesliga/i' => 'Alemania',
+            '/Premier\s*League/i' => 'Inglaterra',
+            '/Serie\s*[A-D]/i' => 'Italia',
+            '/Ligue\s*[12]/i' => 'Francia',
+            '/Liga\s*MX/i' => 'México',
+            '/Eredivisie/i' => 'Holanda',
+            '/Primeira\s*Liga/i' => 'Portugal',
+            '/La\s*Liga/i' => 'España'
+        ];
+        
+        foreach ($specialPatterns as $pattern => $country) {
+            if (preg_match($pattern, $league)) {
+                return $country;
+            }
+        }
+        
+        return ''; // Si no se encuentra, no mostrar país
+    }
+
+    /**
+     * Determine if "Both Teams Score" prediction meets confidence threshold
+     */
+    private function isBothTeamsScoreConfident($prediction, $minConfidence): bool
+    {
+        if (!$prediction || is_null($prediction->both_teams_score_probability)) {
+            return false;
+        }
+        
+        $bothTeamsScoreProb = $prediction->both_teams_score_probability * 100;
+        
+        // Consider confident if probability is very high (>= minConfidence%) or very low (<= 100-minConfidence%)
+        // High confidence for "Yes": >= minConfidence%
+        // High confidence for "No": <= (100 - minConfidence)%
+        return ($bothTeamsScoreProb >= $minConfidence) || ($bothTeamsScoreProb <= (100 - $minConfidence));
     }
 }

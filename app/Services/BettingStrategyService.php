@@ -12,6 +12,28 @@ class BettingStrategyService
     public function calculateBetAmount(BudgetConfiguration $config, FootballMatch $match, string $betType, float $confidence): float
     {
         $currentBudget = $config->current_budget;
+        
+        // CRITICAL FIX: Stop betting if target profit reached
+        if ($config->hasReachedTargetProfit()) {
+            \Log::info("Target profit reached - stopping betting", [
+                'budget_id' => $config->id,
+                'current_profit' => $config->getNetProfitAttribute(),
+                'target_profit' => $config->target_profit
+            ]);
+            return 0; // No betting when target is achieved
+        }
+        
+        // CRITICAL FIX: Stop betting if budget is below minimum threshold
+        $minimumBudget = max(2.0, $config->initial_budget * 0.01); // At least €2 or 1% of initial
+        if ($currentBudget < $minimumBudget) {
+            \Log::info("Budget exhausted - stopping betting", [
+                'budget_id' => $config->id,
+                'current_budget' => $currentBudget,
+                'minimum_threshold' => $minimumBudget
+            ]);
+            return 0; // No betting when budget is too low
+        }
+        
         $maxBetAmount = ($currentBudget * $config->max_bet_percentage) / 100;
 
         return match($config->strategy) {

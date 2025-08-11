@@ -86,4 +86,53 @@ class BudgetConfiguration extends Model
 
         return $maxDrawdown;
     }
+
+    /**
+     * Check if the budget can place a bet
+     */
+    public function canBet(float $minimumAmount = null): bool
+    {
+        $minimumThreshold = $minimumAmount ?? max(2.0, $this->initial_budget * 0.01);
+        
+        return $this->is_active && 
+               $this->current_budget >= $minimumThreshold &&
+               !$this->hasReachedTargetProfit();
+    }
+
+    /**
+     * Check if target profit has been reached
+     */
+    public function hasReachedTargetProfit(): bool
+    {
+        if (!$this->target_profit || $this->target_profit <= 0) {
+            return false; // No target set
+        }
+        
+        $currentProfit = $this->getNetProfitAttribute();
+        return $currentProfit >= $this->target_profit;
+    }
+
+    /**
+     * Check if budget should be deactivated due to target achievement
+     */
+    public function shouldDeactivateForTarget(): bool
+    {
+        return $this->hasReachedTargetProfit() && $this->is_active;
+    }
+
+    /**
+     * Get minimum bet amount based on strategy
+     */
+    public function getMinimumBetAmount(): float
+    {
+        return max(2.0, $this->initial_budget * 0.01);
+    }
+
+    /**
+     * Check if budget is exhausted
+     */
+    public function isExhausted(): bool
+    {
+        return $this->current_budget < $this->getMinimumBetAmount();
+    }
 }

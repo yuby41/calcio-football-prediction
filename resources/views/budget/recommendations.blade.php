@@ -23,6 +23,9 @@
                     Análisis inteligente para: <span class="font-medium">{{ $budget->name }}</span> •
                     Estrategia: <span class="font-medium">{{ ucfirst($budget->strategy) }}</span>
                 </p>
+                <p class="mt-1 text-sm text-blue-600">
+                    ⚽ Los mejores 8 partidos en vivo + 7 programados • Pronósticos de goles y "Ambos anotan" con alta confianza
+                </p>
             </div>
             <div class="text-right">
                 <div class="text-sm text-gray-500">Balance actual</div>
@@ -123,6 +126,25 @@
     </div>
     @endif
 
+    <!-- Info Sistema de Selección -->
+    <div class="bg-blue-50 border border-blue-200 rounded-lg mb-6">
+        <div class="px-4 py-3">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-blue-700">
+                        <strong>Sistema de Selección IA:</strong> Se muestran los 8 mejores partidos en vivo y los 7 mejores programados, 
+                        ordenados por puntuación de calidad (confianza, valor de apuesta, múltiples recomendaciones).
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Recomendaciones -->
     <div id="recommendations-container">
         <div class="flex items-center justify-center py-12">
@@ -185,7 +207,7 @@ function renderRecommendations(recommendations) {
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-xl font-bold text-red-600 flex items-center">
                         <span class="animate-pulse mr-2">🔴</span>
-                        PARTIDOS EN VIVO (${liveMatches.length})
+                        MEJORES PARTIDOS EN VIVO (${liveMatches.length}/8)
                     </h2>
                 </div>
             </div>
@@ -202,7 +224,7 @@ function renderRecommendations(recommendations) {
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-xl font-bold text-gray-700 flex items-center">
                         <span class="mr-2">📅</span>
-                        PARTIDOS PROGRAMADOS (${scheduledMatches.length})
+                        MEJORES PARTIDOS PROGRAMADOS (${scheduledMatches.length}/7)
                     </h2>
                 </div>
             </div>
@@ -232,7 +254,8 @@ function renderMatchWithRecommendations(matchData, index) {
                         </div>
                         <div class="text-center px-4">
                             <div class="text-sm text-gray-500">vs</div>
-                            <div class="text-xs text-gray-400">${matchData.prediction_details.home_goals_prediction} - ${matchData.prediction_details.away_goals_prediction}</div>
+                            <div class="text-sm font-medium text-blue-600">⚽ ${matchData.prediction_details.home_goals_prediction} - ${matchData.prediction_details.away_goals_prediction}</div>
+                            <div class="text-xs text-gray-400">Pronóstico IA</div>
                         </div>
                         <div class="text-center">
                             <div class="text-lg font-bold text-gray-900">${matchData.away_team.short_name}</div>
@@ -245,7 +268,9 @@ function renderMatchWithRecommendations(matchData, index) {
                             ${matchData.is_live ? `<span class="text-red-600 ml-2 font-bold animate-pulse">${liveIndicator}</span>` : ''}
                         </div>
                         <div class="text-xs text-gray-500 mt-1">
-                            <span class="font-medium">${matchData.league}</span>
+                            <span class="font-medium">
+                                ${matchData.country ? matchData.country + ' - ' : ''}${matchData.league}
+                            </span>
                             ${matchData.round ? ` • Jornada ${matchData.round}` : ''}
                         </div>
                         ${matchData.current_score ? `<div class="text-sm font-bold text-red-600 mt-1">${matchData.current_score}</div>` : ''}
@@ -255,11 +280,19 @@ function renderMatchWithRecommendations(matchData, index) {
 
             <!-- Match Analysis -->
             <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+                <div class="grid grid-cols-2 ${matchData.prediction_details.both_teams_score_confident ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4 text-center">
                     <div>
-                        <div class="text-sm text-gray-500">Goles esperados</div>
-                        <div class="font-medium">${matchData.prediction_details.total_goals_prediction.toFixed(1)}</div>
+                        <div class="text-sm text-gray-500">🥅 Goles esperados</div>
+                        <div class="font-bold text-lg text-green-600">${matchData.prediction_details.total_goals_prediction.toFixed(1)}</div>
+                        <div class="text-xs text-gray-400">(${matchData.prediction_details.home_goals_prediction} - ${matchData.prediction_details.away_goals_prediction})</div>
                     </div>
+                    ${matchData.prediction_details.both_teams_score_confident ? `
+                    <div>
+                        <div class="text-sm text-gray-500">🎯 Ambos anotan</div>
+                        <div class="font-bold text-lg ${matchData.prediction_details.both_teams_score_prediction === 'Sí' ? 'text-green-600' : 'text-red-600'}">${matchData.prediction_details.both_teams_score_prediction}</div>
+                        <div class="text-xs text-gray-400">${matchData.prediction_details.both_teams_score_probability.toFixed(1)}%</div>
+                    </div>
+                    ` : ''}
                     <div>
                         <div class="text-sm text-gray-500">Confianza máxima</div>
                         <div class="font-medium">${parseFloat(matchData.max_confidence).toFixed(2)}%</div>
@@ -329,6 +362,39 @@ function renderSingleRecommendation(rec, matchId, isLive = false) {
                 </div>
             </div>
             
+            <!-- Goal Predictions Section -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                <div class="grid grid-cols-1 ${rec.prediction_details && rec.prediction_details.both_teams_score_confident ? 'md:grid-cols-2' : 'md:grid-cols-1'} gap-4">
+                    <div class="flex items-center">
+                        <div class="text-blue-600 mr-2">⚽</div>
+                        <div>
+                            <div class="font-medium text-blue-900">Pronóstico de Goles IA</div>
+                            <div class="text-sm text-blue-800">
+                                Local: <span class="font-semibold">${rec.prediction_details ? rec.prediction_details.home_goals_prediction : 'N/A'}</span> - 
+                                Visitante: <span class="font-semibold">${rec.prediction_details ? rec.prediction_details.away_goals_prediction : 'N/A'}</span>
+                            </div>
+                            <div class="text-xs text-blue-600 mt-1">
+                                Total: ${rec.prediction_details ? rec.prediction_details.total_goals_prediction.toFixed(1) : 'N/A'} goles esperados
+                            </div>
+                        </div>
+                    </div>
+                    ${rec.prediction_details && rec.prediction_details.both_teams_score_confident ? `
+                    <div class="flex items-center">
+                        <div class="text-green-600 mr-2">🎯</div>
+                        <div>
+                            <div class="font-medium text-green-900">Ambos Anotan</div>
+                            <div class="text-sm text-green-800">
+                                Predicción: <span class="font-semibold">${rec.prediction_details.both_teams_score_prediction}</span>
+                            </div>
+                            <div class="text-xs text-green-600 mt-1">
+                                Probabilidad: ${rec.prediction_details.both_teams_score_probability.toFixed(1)}%
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            
             <!-- Value Betting Indicator -->
             ${rec.analysis.value_rating > 5 ? `
                 <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
@@ -375,7 +441,8 @@ function renderSimpleRecommendation(rec, index) {
                         </div>
                         <div class="text-center px-4">
                             <div class="text-sm text-gray-500">vs</div>
-                            <div class="text-xs text-gray-400">${rec.prediction_details.home_goals_prediction} - ${rec.prediction_details.away_goals_prediction}</div>
+                            <div class="text-sm font-medium text-blue-600">⚽ ${rec.prediction_details.home_goals_prediction} - ${rec.prediction_details.away_goals_prediction}</div>
+                            <div class="text-xs text-gray-400">Pronóstico IA</div>
                         </div>
                         <div class="text-center">
                             <div class="text-lg font-bold text-gray-900">${rec.away_team.short_name}</div>
@@ -388,7 +455,7 @@ function renderSimpleRecommendation(rec, index) {
                             ${rec.is_live ? `<span class="text-red-600 ml-2">${liveIndicator}</span>` : ''}
                         </div>
                         <div class="text-xs text-gray-500 mt-1">
-                            <span class="font-medium">${rec.league}</span>
+                            <span class="font-medium">${rec.country ? rec.country + ' - ' : ''}${rec.league}</span>
                             ${rec.round ? ` • Jornada ${rec.round}` : ''}
                         </div>
                         ${rec.current_score ? `<div class="text-sm font-bold text-red-600 mt-1">${rec.current_score}</div>` : ''}
@@ -400,8 +467,9 @@ function renderSimpleRecommendation(rec, index) {
             <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
                     <div>
-                        <div class="text-sm text-gray-500">Goles esperados</div>
-                        <div class="font-medium">${rec.prediction_details.total_goals_prediction.toFixed(1)}</div>
+                        <div class="text-sm text-gray-500">🥅 Goles esperados</div>
+                        <div class="font-bold text-lg text-green-600">${rec.prediction_details.total_goals_prediction.toFixed(1)}</div>
+                        <div class="text-xs text-gray-400">(${rec.prediction_details.home_goals_prediction} - ${rec.prediction_details.away_goals_prediction})</div>
                     </div>
                     <div>
                         <div class="text-sm text-gray-500">Dificultad</div>
@@ -504,7 +572,8 @@ function renderMatchRecommendation(data, index) {
                         </div>
                         <div class="text-center px-4">
                             <div class="text-sm text-gray-500">vs</div>
-                            <div class="text-xs text-gray-400">${analysis.expected_goals.home} - ${analysis.expected_goals.away}</div>
+                            <div class="text-sm font-medium text-blue-600">⚽ ${analysis.expected_goals.home} - ${analysis.expected_goals.away}</div>
+                            <div class="text-xs text-gray-400">Goles esperados</div>
                         </div>
                         <div class="text-center">
                             <div class="text-lg font-bold text-gray-900">${match.away_team.name}</div>
@@ -530,18 +599,24 @@ function renderMatchRecommendation(data, index) {
 
             <!-- Match Analysis -->
             <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
                     <div>
                         <div class="text-sm text-gray-500">Resultado más probable</div>
                         <div class="font-medium">${analysis.most_likely_outcome}</div>
                     </div>
                     <div>
-                        <div class="text-sm text-gray-500">Confianza general</div>
-                        <div class="font-medium">${analysis.overall_confidence}%</div>
+                        <div class="text-sm text-gray-500">🥅 Total goles</div>
+                        <div class="font-bold text-lg text-green-600">${analysis.total_goals_expected}</div>
+                        <div class="text-xs text-gray-400">(${analysis.expected_goals.home} - ${analysis.expected_goals.away})</div>
                     </div>
                     <div>
-                        <div class="text-sm text-gray-500">Goles esperados</div>
-                        <div class="font-medium">${analysis.total_goals_expected}</div>
+                        <div class="text-sm text-gray-500">🎯 Ambos anotan</div>
+                        <div class="font-bold text-lg ${analysis.both_teams_score === 'Sí' ? 'text-green-600' : 'text-red-600'}">${analysis.both_teams_score || 'N/A'}</div>
+                        <div class="text-xs text-gray-400">${analysis.both_teams_score_probability ? analysis.both_teams_score_probability.toFixed(1) + '%' : 'N/A'}</div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Confianza general</div>
+                        <div class="font-medium">${analysis.overall_confidence}%</div>
                     </div>
                     <div>
                         <div class="text-sm text-gray-500">Apuestas valor</div>
@@ -880,21 +955,31 @@ function updateDisplayedBalance(newBalance) {
 }
 
 function getOddsSourceLabel(source) {
-    if (!source) return 'bet365';
+    if (!source) return '⚠️ Sintética';
     
     const sources = {
-        'bet365_real': 'bet365',
-        'pinnacle_real': 'Pinnacle',
-        'betfair_real': 'Betfair',
-        'unibet_real': 'Unibet',
-        '1xbet_real': '1xBet',
-        'marathonbet_real': 'Marathon',
-        'bet365_fallback': 'bet365 (equiv.)',
-        'pinnacle_fallback': 'Pinnacle (equiv.)',
-        'footballapi_fallback': 'Casa apuestas (equiv.)',
-        'fallback_realistic': 'Casa apuestas (equiv.)'
+        'bet365_real': '📈 bet365',
+        'pinnacle_real': '📈 Pinnacle', 
+        'betfair_real': '📈 Betfair',
+        'unibet_real': '📈 Unibet',
+        '1xbet_real': '📈 1xBet',
+        'marathonbet_real': '📈 Marathon',
+        '10bet_real': '📈 10bet',
+        'bwin_real': '📈 bwin',
+        'bet365_fallback': '⚠️ bet365 (equiv.)',
+        'pinnacle_fallback': '⚠️ Pinnacle (equiv.)',
+        'footballapi_fallback': '⚠️ Casa apuestas (equiv.)',
+        'fallback_realistic': '⚠️ Casa apuestas (equiv.)',
+        'synthetic': '⚠️ Sintética',
+        'fallback': '⚠️ Sintética'
     };
-    return sources[source] || 'Casa apuestas';
+    
+    // If source contains "_real", it's real odds, otherwise synthetic
+    if (source && source.includes('_real')) {
+        return sources[source] || '📈 ' + source.replace('_real', '');
+    } else {
+        return sources[source] || '⚠️ Sintética';
+    }
 }
 
 function calculateInitialAmount(confidence) {

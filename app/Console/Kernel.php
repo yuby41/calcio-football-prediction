@@ -17,7 +17,7 @@ class Kernel extends ConsoleKernel
         // ==========================================
         
         // 🏈 FOOTBALL DATA SYNC (Primary - every 30 minutes)
-        $schedule->command('football:update-today --leagues=PL,PD,BL1,SA,FL1,CL,EL')
+        $schedule->command('football:update-today')
                  ->everyThirtyMinutes()
                  ->withoutOverlapping()
                  ->runInBackground();
@@ -38,9 +38,24 @@ class Kernel extends ConsoleKernel
                  ->dailyAt('04:00')
                  ->withoutOverlapping();
 
-        // 💰 BET RESOLUTION (Every 15 minutes)
-        $schedule->command('bets:resolve-pending')
-                 ->everyFifteenMinutes()
+        // 💰 BET RESOLUTION (Every 10 minutes with smart estimation)
+        $schedule->command('bets:auto-resolve --estimate-missing')
+                 ->everyTenMinutes()
+                 ->withoutOverlapping();
+        
+        // 🔍 BET RESOLUTION MONITORING (Every hour)
+        $schedule->command('bets:monitor')
+                 ->hourly()
+                 ->withoutOverlapping();
+
+        // 💰 EXHAUSTED BUDGETS CHECK (Every 30 minutes with auto-deactivation)
+        $schedule->command('budgets:check-exhausted --deactivate')
+                 ->everyThirtyMinutes()
+                 ->withoutOverlapping();
+                 
+        // 🎯 TARGET PROFIT CHECK (Every 30 minutes with auto-deactivation)
+        $schedule->command('budget:check-target-profit --fix')
+                 ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
         // ⚽ MATCH RESULTS UPDATE (Every 30 minutes)
@@ -48,9 +63,9 @@ class Kernel extends ConsoleKernel
                  ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
-        // 📈 STATISTICS UPDATE (Every 2 hours)
+        // 📈 STATISTICS UPDATE (Every 30 minutes for faster betting decisions)
         $schedule->command('statistics:update')
-                 ->everyTwoHours()
+                 ->everyThirtyMinutes()
                  ->withoutOverlapping();
 
         // 🧠 ML PREDICTIONS (Every hour)
@@ -58,6 +73,11 @@ class Kernel extends ConsoleKernel
                  ->hourly()
                  ->withoutOverlapping()
                  ->runInBackground();
+
+        // 🔴 LIVE MATCH PREDICTIONS (Every 15 minutes for urgent live matches)
+        $schedule->command('ml:predict-live')
+                 ->everyFifteenMinutes()
+                 ->withoutOverlapping();
 
         // ==========================================
         // 🌙 NIGHTLY MAINTENANCE (01:00-06:00)
@@ -107,6 +127,23 @@ class Kernel extends ConsoleKernel
         // 🧹 LOG CLEANUP (Twice daily)
         $schedule->command('logs:clean --days=7')
                  ->twiceDaily(2, 14)
+                 ->withoutOverlapping();
+
+        // ⚽ FIRST HALF DATA UPDATE (Every 2 hours for betting accuracy)
+        $schedule->command('matches:update-first-half')
+                 ->everyTwoHours()
+                 ->withoutOverlapping();
+                 
+        // 🔍 REAL FIRST HALF DATA VERIFICATION (Daily at 7 AM to fix synthetic data)
+        $schedule->command('matches:verify-real-first-half --fix --limit=100')
+                 ->dailyAt('07:00')
+                 ->withoutOverlapping();
+                 
+        // 🤖 ML TRAINING DATA AUDIT (Weekly on Mondays at 6 AM)
+        $schedule->command('ml:audit-training-data --fix')
+                 ->weekly()
+                 ->mondays()
+                 ->at('06:00')
                  ->withoutOverlapping();
     }
 
