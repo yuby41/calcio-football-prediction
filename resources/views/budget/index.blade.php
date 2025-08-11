@@ -214,7 +214,12 @@
                         <div class="text-sm font-medium text-gray-900">
                             {{ $bet->budgetConfiguration->name }}
                         </div>
-                        <div class="text-sm text-{{ $bet->actual_profit >= 0 ? 'green' : 'red' }}-600">
+                        <div class="text-sm 
+                            @if($bet->actual_profit !== null)
+                                text-{{ $bet->actual_profit >= 0 ? 'green' : 'red' }}-600
+                            @else
+                                text-blue-600
+                            @endif">
                             @if($bet->actual_profit !== null)
                                 {{ $bet->actual_profit >= 0 ? '+' : '' }}€{{ number_format($bet->actual_profit, 2) }}
                             @else
