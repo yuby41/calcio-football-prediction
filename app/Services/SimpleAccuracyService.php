@@ -18,8 +18,8 @@ class SimpleAccuracyService
             $lastUpdate = Cache::get($cacheKey . '_timestamp');
             $cachedAccuracy = Cache::get($cacheKey);
             
-            // Force update every 1 minute or if no cache exists
-            if ($cachedAccuracy === null || !$lastUpdate || $lastUpdate->diffInMinutes(Carbon::now()) >= 1) {
+            // Force update every 30 seconds for betting decisions
+            if ($cachedAccuracy === null || !$lastUpdate || $lastUpdate->diffInSeconds(Carbon::now()) >= 30) {
                 
                 // Auto-update finished matches first
                 self::autoUpdateFinishedMatches();
@@ -27,9 +27,9 @@ class SimpleAccuracyService
                 // Calculate accuracy
                 $accuracy = self::calculateAccuracy();
                 
-                // Cache the result for 10 minutes but check every 2 minutes
-                Cache::put($cacheKey, $accuracy, 600);
-                Cache::put($cacheKey . '_timestamp', Carbon::now(), 600);
+                // Cache the result for 5 minutes but check every 30 seconds
+                Cache::put($cacheKey, $accuracy, 300);
+                Cache::put($cacheKey . '_timestamp', Carbon::now(), 300);
                 
                 Log::info("Accuracy updated: {$accuracy}%");
                 
@@ -88,26 +88,24 @@ class SimpleAccuracyService
             // Determine actual result
             $actualResult = self::determineMatchResult($match);
             
-            // Update prediction accuracy if not already set
-            if (is_null($prediction->is_correct)) {
-                $prediction->is_correct = $prediction->predicted_outcome === $actualResult;
-                
-                // Also update other prediction types
-                if (!is_null($prediction->both_teams_score_probability)) {
-                    $actualBothScored = $match->home_goals > 0 && $match->away_goals > 0;
-                    $predictedBothScore = $prediction->both_teams_score_probability > 0.5;
-                    $prediction->both_teams_score_correct = $actualBothScored === $predictedBothScore;
-                }
-                
-                if (!is_null($prediction->over_2_5_probability)) {
-                    $totalGoals = $match->home_goals + $match->away_goals;
-                    $actualOver25 = $totalGoals > 2.5;
-                    $predictedOver25 = $prediction->over_2_5_probability > $prediction->under_2_5_probability;
-                    $prediction->over_under_correct = $actualOver25 === $predictedOver25;
-                }
-                
-                $prediction->save();
+            // Always update prediction accuracy for consistency
+            $prediction->is_correct = $prediction->predicted_outcome === $actualResult;
+            
+            // Also update other prediction types
+            if (!is_null($prediction->both_teams_score_probability)) {
+                $actualBothScored = $match->home_goals > 0 && $match->away_goals > 0;
+                $predictedBothScore = $prediction->both_teams_score_probability > 0.5;
+                $prediction->both_teams_score_correct = $actualBothScored === $predictedBothScore;
             }
+            
+            if (!is_null($prediction->over_2_5_probability)) {
+                $totalGoals = $match->home_goals + $match->away_goals;
+                $actualOver25 = $totalGoals > 2.5;
+                $predictedOver25 = $prediction->over_2_5_probability > $prediction->under_2_5_probability;
+                $prediction->over_under_correct = $actualOver25 === $predictedOver25;
+            }
+            
+            $prediction->save();
             
             if ($prediction->is_correct) {
                 $correctPredictions++;

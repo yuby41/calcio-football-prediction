@@ -43,6 +43,6 @@
     "away_consistency"
   ],
   "model_version": "3.0.0-enhanced-outcomes",
-  "trained_at": "2025-08-06T02:29:43.561361",
+  "trained_at": "2025-08-08T02:32:24.423384",
   "ensemble_type": "Enhanced XGBoost + LightGBM + Neural Network + Random Forest"
 }

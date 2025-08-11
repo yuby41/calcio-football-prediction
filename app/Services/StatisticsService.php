@@ -446,16 +446,22 @@ class StatisticsService
 
         // Update first half statistics if needed
         foreach ($finishedMatches as $match) {
-            // Simulate first half goals for accuracy calculation
-            $totalGoals = $match->home_goals + $match->away_goals;
-            $firstHalfGoals = $this->simulateFirstHalfGoals($totalGoals, $match->id);
+            // Use REAL first half data when available, fallback to simulation only if needed
+            $firstHalfGoals = null;
             
-            // Over 0.5 first half
-            if (is_null($match->prediction->first_half_over_0_5_correct)) {
-                $predictedOver05 = $match->prediction->first_half_over_0_5_probability > 0.5;
-                $actualOver05 = $firstHalfGoals > 0.5;
-                $match->prediction->first_half_over_0_5_correct = $actualOver05 === $predictedOver05;
+            if (!is_null($match->home_goals_first_half) && !is_null($match->away_goals_first_half)) {
+                // Use real first half data
+                $firstHalfGoals = $match->home_goals_first_half + $match->away_goals_first_half;
+            } else {
+                // Fallback to simulation only when real data is not available
+                $totalGoals = $match->home_goals + $match->away_goals;
+                $firstHalfGoals = $this->simulateFirstHalfGoals($totalGoals, $match->id);
             }
+            
+            // Over 0.5 first half - ALWAYS recalculate to ensure accuracy
+            $predictedOver05 = $match->prediction->first_half_over_0_5_probability > 0.5;
+            $actualOver05 = $firstHalfGoals > 0.5;
+            $match->prediction->first_half_over_0_5_correct = $actualOver05 === $predictedOver05;
             
             // Over 1.5 first half removed as requested
             

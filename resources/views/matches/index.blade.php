@@ -147,6 +147,18 @@
                                         <div class="text-xs text-gray-500">
                                             Confianza: {{ $match->prediction->confidence_level }}
                                         </div>
+                                        <div class="text-xs px-2 py-1 rounded-full 
+                                            @if(str_contains($match->prediction->model_version ?? '', '3.0.0')) 
+                                                bg-green-100 text-green-700
+                                            @else 
+                                                bg-orange-100 text-orange-700
+                                            @endif">
+                                            @if(str_contains($match->prediction->model_version ?? '', '3.0.0'))
+                                                ML 3.0
+                                            @else
+                                                ML {{ explode('-', $match->prediction->model_version ?? '')[0] ?? 'Legacy' }}
+                                            @endif
+                                        </div>
                                         
                                         @if($match->status === 'finished' && !is_null($match->prediction->overall_accuracy))
                                             @php
@@ -175,9 +187,12 @@
                                                 </span>
                                             @endif
                                         </div>
-                                        <div>Casa: {{ number_format($match->prediction->home_win_probability * 100, 1) }}%</div>
-                                        <div>Empate: {{ number_format($match->prediction->draw_probability * 100, 1) }}%</div>
-                                        <div>Visitante: {{ number_format($match->prediction->away_win_probability * 100, 1) }}%</div>
+                                        @php
+                                            $normalizedProbs = $match->prediction->normalized_win_probabilities;
+                                        @endphp
+                                        <div>Casa: {{ $normalizedProbs['home'] }}%</div>
+                                        <div>Empate: {{ $normalizedProbs['draw'] }}%</div>
+                                        <div>Visitante: {{ $normalizedProbs['away'] }}%</div>
                                         @if($match->status === 'finished')
                                             <div class="text-blue-600 font-medium mt-1">
                                                 Real: 

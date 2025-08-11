@@ -38,12 +38,12 @@ class UpdateStatistics
         $lastUpdate = Cache::get('statistics_last_update');
         $now = Carbon::now();
         
-        // Dispatch update job if more than 10 minutes have passed
-        if (!$lastUpdate || $now->diffInMinutes($lastUpdate) >= 10) {
+        // Dispatch update job if more than 3 minutes have passed (increased frequency for betting decisions)
+        if (!$lastUpdate || $now->diffInMinutes($lastUpdate) >= 3) {
             try {
                 // Dispatch job to update prediction accuracy
                 UpdatePredictionAccuracy::dispatch();
-                Cache::put('statistics_last_update', $now, 60); // Cache for 1 hour
+                Cache::put('statistics_last_update', $now, 15); // Cache for 15 minutes only
             } catch (\Exception $e) {
                 // Log error but don't break the request
                 \Log::warning('Failed to dispatch statistics update job: ' . $e->getMessage());

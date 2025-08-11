@@ -42,6 +42,20 @@ class Bet extends Model
         'resolved_at' => 'datetime',
     ];
 
+    protected static function boot()
+    {
+        parent::boot();
+        
+        static::updating(function ($bet) {
+            // Auto-set resolved_at when status changes to won/lost
+            if ($bet->isDirty('status') && 
+                in_array($bet->status, ['won', 'lost']) && 
+                is_null($bet->resolved_at)) {
+                $bet->resolved_at = now();
+            }
+        });
+    }
+
     public function budgetConfiguration(): BelongsTo
     {
         return $this->belongsTo(BudgetConfiguration::class);
@@ -176,7 +190,7 @@ class Bet extends Model
                 break;
         }
 
-        $profit = $won ? ($this->amount * $this->odds) - $this->amount : -$this->amount;
+        $profit = $won ? ($this->amount * $this->odds) : -$this->amount;
         
         return [
             'status' => $won ? 'won' : 'lost',

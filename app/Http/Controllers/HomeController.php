@@ -23,7 +23,7 @@ class HomeController extends Controller
             ->orderBy('match_date')
             ->paginate($perPage, ['*'], 'live_page');
 
-        // Get today's scheduled matches with pagination
+        // Get today's scheduled matches with pagination  
         $todayMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
             ->whereDate('match_date', Carbon::today())
             ->where('status', 'scheduled')

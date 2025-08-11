@@ -41,8 +41,8 @@ class StatisticsController extends Controller
 
     public function chartData(Request $request)
     {
-        $type = $request->get('type', 'match_outcome'); // default to match_outcome if null
-        $period = $request->get('period', 'monthly'); // daily, weekly, monthly, yearly
+        $type = $request->get('type') ?: 'match_outcome'; // Ensure non-null default
+        $period = $request->get('period') ?: 'monthly'; // Ensure non-null default
         
         $chartData = match($period) {
             'daily' => $this->getDailyAccuracyData($type),
@@ -337,7 +337,7 @@ class StatisticsController extends Controller
         };
     }
 
-    private function getDailyAccuracyData(string $type): array
+    private function getDailyAccuracyData(?string $type = null): array
     {
         $matches = $this->getMatchesForType($type);
         $dailyStats = [];
@@ -377,7 +377,7 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getWeeklyAccuracyData(string $type): array
+    private function getWeeklyAccuracyData(?string $type = null): array
     {
         $matches = $this->getMatchesForType($type);
         $weeklyStats = [];
@@ -417,7 +417,7 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getMonthlyAccuracyData(string $type): array
+    private function getMonthlyAccuracyData(?string $type = null): array
     {
         $matches = $this->getMatchesForType($type);
         $monthlyStats = [];
@@ -457,7 +457,7 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getYearlyAccuracyData(string $type): array
+    private function getYearlyAccuracyData(?string $type = null): array
     {
         $matches = $this->getMatchesForType($type);
         $yearlyStats = [];
@@ -490,8 +490,11 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getMatchesForType(string $type)
+    private function getMatchesForType(?string $type = null)
     {
+        // Default to match_outcome if type is null
+        $type = $type ?: 'match_outcome';
+        
         $query = FootballMatch::with(['prediction', 'homeTeam', 'awayTeam'])
             ->where('status', 'finished')
             ->whereHas('prediction')
@@ -519,11 +522,11 @@ class StatisticsController extends Controller
         return $query->orderBy('match_date', 'desc')->get();
     }
 
-    private function isPredictionCorrect($match, string $type): bool
+    private function isPredictionCorrect($match, ?string $type = null): bool
     {
         $prediction = $match->prediction;
         
-        return match($type) {
+        return match($type ?: 'match_outcome') {
             'match_outcome' => $prediction->is_correct ?? false,
             'both_teams_score_yes' => $this->isBothTeamsScoreYesCorrect($match),
             'both_teams_score_no' => $this->isBothTeamsScoreNoCorrect($match),

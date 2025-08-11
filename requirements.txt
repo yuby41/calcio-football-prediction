@@ -1,0 +1,27 @@
+# Dependencias ML para Calcio
+# Sistema de predicciones de fútbol mejorado
+
+# Core ML Libraries
+pandas>=2.3.0
+numpy>=2.3.0
+scikit-learn>=1.7.0
+xgboost>=3.0.0
+lightgbm>=4.6.0
+scipy>=1.16.0
+joblib>=1.5.0
+
+# Database
+sqlalchemy>=2.0.40
+pymysql>=1.1.0
+
+# Data Processing
+python-dateutil>=2.9.0
+pytz>=2025.2
+
+# Performance
+threadpoolctl>=3.6.0
+
+# Development (opcional)
+jupyter>=1.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0

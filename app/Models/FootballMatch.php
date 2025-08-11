@@ -49,7 +49,15 @@ class FootballMatch extends Model
 
     public function prediction(): HasOne
     {
-        return $this->hasOne(MatchPrediction::class, 'match_id');
+        return $this->hasOne(MatchPrediction::class, 'match_id')
+            ->orderByRaw("
+                CASE model_version 
+                    WHEN '3.0.0-enhanced-outcomes' THEN 1
+                    WHEN '3.0.0-enhanced-outcomes-fixed' THEN 2
+                    WHEN '2.0.0-ensemble' THEN 3
+                    ELSE 4
+                END
+            ");
     }
 
     public function getResultAttribute(): ?string

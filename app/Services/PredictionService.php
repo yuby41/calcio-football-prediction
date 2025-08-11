@@ -55,24 +55,13 @@ class PredictionService
                 return true;
             }
             
-            $mlPath = base_path('ml');
-            $predictionData = null;
+            // PRIORITY: Use new Simple Effective Predictor (better accuracy)
+            Log::info("Using Simple Effective Predictor for match {$match->id}");
+            $predictionData = $this->predictWithSimpleEffectiveModel($match);
             
-            // Try enhanced predictor first if available
-            if ($this->hasEnhancedModels()) {
-                Log::info("Using enhanced ML predictor for match {$match->id}");
-                $predictionData = $this->predictWithEnhancedModels($match, $mlPath);
-            }
-            
-            // Fallback to original predictor if enhanced not available or failed
+            // Fallback to statistical prediction if needed
             if (!$predictionData) {
-                Log::info("Using standard ML predictor for match {$match->id}");
-                $predictionData = $this->predictWithStandardModels($match, $mlPath);
-            }
-            
-            // If both ML predictions failed, create a basic prediction based on team stats
-            if (!$predictionData) {
-                Log::warning("ML prediction failed for match {$match->id}, using fallback prediction");
+                Log::warning("Simple predictor failed for match {$match->id}, using statistical fallback");
                 $predictionData = $this->createFallbackPrediction($match);
             }
             
@@ -152,11 +141,10 @@ class PredictionService
         
         $pythonPath = "/home/yualbe/.local/lib/python3.12/site-packages:/usr/lib/python3/dist-packages:/usr/local/lib/python3.12/dist-packages";
         
+        // Usar únicamente el entorno virtual configurado definitivamente
+        $basePath = base_path();
         $commands = [
-            "cd {$mlPath} && source venv/bin/activate && python enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "cd {$mlPath} && PYTHONPATH={$pythonPath} python3 enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "PYTHONPATH={$pythonPath} python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "PYTHONPATH={$pythonPath} /usr/bin/python3 {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}"
+            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}'"
         ];
         
         foreach ($commands as $command) {
@@ -192,11 +180,10 @@ class PredictionService
     {
         $pythonScript = base_path('ml/football_predictor.py');
         
+        // Usar únicamente el entorno virtual configurado definitivamente
+        $basePath = base_path();
         $commands = [
-            "cd {$mlPath} && source venv/bin/activate && python football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "cd {$mlPath} && python3 football_predictor.py predict {$match->home_team_id} {$match->away_team_id}",
-            "python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}",
-            "/usr/bin/python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}"
+            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}'"
         ];
         
         foreach ($commands as $command) {
@@ -227,10 +214,10 @@ class PredictionService
     private function checkPythonDependencies(): bool
     {
         try {
+            // Usar únicamente el entorno virtual configurado definitivamente
+            $basePath = base_path();
             $commands = [
-                'cd ' . base_path('ml') . ' && source venv/bin/activate && python -c "import pandas, numpy, sklearn, xgboost; print(\'OK\')"',
-                'python3 -c "import pandas, numpy, sklearn, xgboost; print(\'OK\')"',
-                '/usr/bin/python3 -c "import pandas, numpy, sklearn, xgboost; print(\'OK\')"'
+                "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python -c \"import pandas, numpy, sklearn, xgboost, lightgbm; print(\\\"OK\\\")\"'"
             ];
             
             foreach ($commands as $command) {
@@ -429,5 +416,145 @@ class PredictionService
         // Use team characteristics to generate consistent default values
         $teamHash = crc32($team->name . 'goals_against') % 100;
         return 1.0 + ($teamHash / 100 * 1.0); // Range: 1.0 to 2.0
+    }
+    
+    /**
+     * NEW: Simple Effective Predictor - Target >52% accuracy
+     * Replaces complex ML models with proven statistical approach
+     */
+    private function predictWithSimpleEffectiveModel(FootballMatch $match): ?array
+    {
+        try {
+            $basePath = base_path();
+            $pythonScript = $basePath . '/ml/simple_effective_predictor.py';
+            
+            if (!file_exists($pythonScript)) {
+                Log::warning("Simple effective predictor script not found at: {$pythonScript}");
+                return null;
+            }
+            
+            // Use the configured ML environment
+            $command = "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$pythonScript} {$match->home_team_id} {$match->away_team_id}'";
+            
+            $process = Process::fromShellCommandline($command);
+            $process->setTimeout(30);
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                Log::warning("Simple effective predictor failed for match {$match->id}. Error: " . $process->getErrorOutput());
+                return null;
+            }
+            
+            $output = $process->getOutput();
+            $result = json_decode($output, true);
+            
+            if (!$result || !isset($result['success']) || !$result['success']) {
+                Log::warning("Invalid response from simple effective predictor for match {$match->id}");
+                return null;
+            }
+            
+            $predictions = $result['predictions'];
+            $outcomeData = $predictions['match_outcome'];
+            $overUnder = $predictions['over_under_2_5'];
+            $firstHalf = $predictions['first_half_over_0_5'];
+            
+            // Map to database format
+            return [
+                'predicted_outcome' => $outcomeData['predicted_outcome'],
+                'confidence_score' => $outcomeData['confidence'] / 100.0, // Convert percentage to decimal
+                'model_version' => $outcomeData['model_version'],
+                
+                // Goals predictions
+                'predicted_home_goals' => $outcomeData['home_expected_goals'],
+                'predicted_away_goals' => $outcomeData['away_expected_goals'],
+                
+                // Over/Under predictions
+                'over_2_5_prediction' => $overUnder['prediction'] === 'over',
+                'over_2_5_confidence' => $overUnder['confidence'] / 100.0,
+                
+                // First half predictions  
+                'over_0_5_first_half_prediction' => $firstHalf['prediction'] === 'over_0_5_first_half',
+                'first_half_confidence' => $firstHalf['confidence'] / 100.0,
+                
+                // Both teams score (improved logic)
+                'both_teams_score_prediction' => $this->predictBothTeamsScore($outcomeData['home_expected_goals'], $outcomeData['away_expected_goals']),
+                'both_teams_score_confidence' => $this->getBothTeamsScoreConfidence($outcomeData['home_expected_goals'], $outcomeData['away_expected_goals']),
+                
+                // Additional metadata
+                'prediction_type' => 'main_outcome',
+                'created_at' => now(),
+                'updated_at' => now()
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error("Exception in Simple Effective Predictor for match {$match->id}: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Improved Both Teams Score prediction logic
+     */
+    private function predictBothTeamsScore(float $homeExpected, float $awayExpected): bool
+    {
+        // Both teams score more likely when:
+        // 1. Both teams have decent attacking capability (>0.7 goals expected)
+        // 2. Neither team is extremely defensive
+        // 3. Match is expected to have goals
+        
+        $totalExpected = $homeExpected + $awayExpected;
+        
+        // Conservative approach: Both need reasonable goal expectation
+        if ($homeExpected >= 0.9 && $awayExpected >= 0.9) {
+            return true; // Both teams strong - very likely both score
+        }
+        
+        if ($homeExpected >= 0.7 && $awayExpected >= 0.7 && $totalExpected >= 2.2) {
+            return true; // Decent attacks + enough total goals
+        }
+        
+        if ($totalExpected >= 3.0 && min($homeExpected, $awayExpected) >= 0.6) {
+            return true; // High-scoring match, even weaker team likely to score
+        }
+        
+        return false; // Conservative: predict NO if not confident
+    }
+    
+    /**
+     * Calculate confidence for Both Teams Score prediction
+     */
+    private function getBothTeamsScoreConfidence(float $homeExpected, float $awayExpected): float
+    {
+        $totalExpected = $homeExpected + $awayExpected;
+        $minExpected = min($homeExpected, $awayExpected);
+        $maxExpected = max($homeExpected, $awayExpected);
+        
+        // Base confidence on the weaker team's scoring ability
+        if ($minExpected >= 1.2) {
+            $confidence = 0.85; // Very confident both will score
+        } elseif ($minExpected >= 1.0) {
+            $confidence = 0.75; // Quite confident
+        } elseif ($minExpected >= 0.8) {
+            $confidence = 0.65; // Moderately confident
+        } else {
+            $confidence = 0.55; // Low confidence
+        }
+        
+        // Adjust based on total goals expected
+        if ($totalExpected >= 3.5) {
+            $confidence += 0.1; // High-scoring games favor BTS
+        } elseif ($totalExpected <= 2.0) {
+            $confidence -= 0.1; // Low-scoring games less likely BTS
+        }
+        
+        // Ensure balance between teams (avoid one-sided games)
+        $balance = $minExpected / $maxExpected;
+        if ($balance < 0.4) {
+            $confidence -= 0.15; // Very unbalanced teams
+        } elseif ($balance > 0.7) {
+            $confidence += 0.05; // Well-balanced teams
+        }
+        
+        return max(0.50, min(0.90, $confidence));
     }
 }

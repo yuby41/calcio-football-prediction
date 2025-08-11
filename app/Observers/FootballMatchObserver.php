@@ -89,7 +89,7 @@ class FootballMatchObserver
         // Update global statistics after updating individual prediction
         // Using direct call to avoid mbstring dependency
         try {
-            \Artisan::call('statistics:update-sql');
+            \Artisan::call('statistics:update');
             
             // Broadcast statistics update event
             $accuracy = \App\Services\SimpleAccuracyService::getCurrentAccuracy();

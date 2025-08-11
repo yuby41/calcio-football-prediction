@@ -135,8 +135,10 @@ class MatchPrediction extends Model
         
         $predictions = [];
         
-        // Main outcome
-        $predictions[] = $this->is_correct;
+        // Main outcome (always include if match is finished)
+        if (!is_null($this->is_correct)) {
+            $predictions[] = $this->is_correct;
+        }
         
         // Both teams score
         if (!is_null($this->both_teams_score_correct)) {
@@ -153,12 +155,24 @@ class MatchPrediction extends Model
             $predictions[] = $this->first_half_over_0_5_correct;
         }
         
+        // If no predictions are set, return 0 instead of null for finished matches
         if (empty($predictions)) {
-            return null;
+            return 0.0;
         }
         
-        $correctPredictions = count(array_filter($predictions));
-        $totalPredictions = count($predictions);
+        // Filter out null values to avoid counting them as false
+        $validPredictions = array_filter($predictions, function($prediction) {
+            return !is_null($prediction);
+        });
+        
+        if (empty($validPredictions)) {
+            return 0.0;
+        }
+        
+        $correctPredictions = count(array_filter($validPredictions, function($prediction) {
+            return $prediction === true;
+        }));
+        $totalPredictions = count($validPredictions);
         
         return round(($correctPredictions / $totalPredictions) * 100, 1);
     }
@@ -243,5 +257,33 @@ class MatchPrediction extends Model
     public function getTotalFirstHalfGoalsPredictionAttribute(): float
     {
         return round($this->home_goals_first_half_prediction + $this->away_goals_first_half_prediction, 2);
+    }
+
+    /**
+     * Get normalized win probabilities that sum to 100%
+     */
+    public function getNormalizedWinProbabilitiesAttribute(): array
+    {
+        $home = $this->home_win_probability ?? 0;
+        $draw = $this->draw_probability ?? 0;
+        $away = $this->away_win_probability ?? 0;
+        
+        $total = $home + $draw + $away;
+        
+        // If total is 0 or very close to 0, return equal probabilities
+        if ($total < 0.001) {
+            return [
+                'home' => 33.3,
+                'draw' => 33.3,
+                'away' => 33.4
+            ];
+        }
+        
+        // Normalize to sum to 100%
+        return [
+            'home' => round(($home / $total) * 100, 1),
+            'draw' => round(($draw / $total) * 100, 1),
+            'away' => round(($away / $total) * 100, 1)
+        ];
     }
 }

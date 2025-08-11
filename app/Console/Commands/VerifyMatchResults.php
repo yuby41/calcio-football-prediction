@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 
 class VerifyMatchResults extends Command
 {
-    protected $signature = 'matches:verify-results {--match-id= : Specific match ID to verify} {--external-id= : Specific external ID to verify} {--fix : Fix incorrect results} {--limit=10 : Limit the number of matches to verify}';
+    protected $signature = 'matches:verify-results {--match-id= : Specific match ID to verify} {--external-id= : Specific external ID to verify} {--fix : Fix incorrect results} {--limit=1000 : Limit the number of matches to verify}';
     protected $description = 'Verify match results against external API and fix discrepancies';
 
     private string $apiKey;

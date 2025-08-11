@@ -99,14 +99,17 @@
             <!-- Win Probabilities -->
             <div>
                 <h4 class="font-medium text-gray-900 mb-3">Probabilidades de Resultado</h4>
+                @php
+                    $normalizedProbs = $match->prediction->normalized_win_probabilities;
+                @endphp
                 <div class="space-y-3">
                     <div class="flex items-center justify-between">
                         <span class="text-sm text-gray-600">Victoria Local</span>
                         <div class="flex items-center space-x-2">
                             <div class="w-24 bg-gray-200 rounded-full h-2">
-                                <div class="bg-blue-600 h-2 rounded-full" style="width: {{ $match->prediction->home_win_probability * 100 }}%"></div>
+                                <div class="bg-blue-600 h-2 rounded-full" style="width: {{ $normalizedProbs['home'] }}%"></div>
                             </div>
-                            <span class="text-sm font-medium">{{ number_format($match->prediction->home_win_probability * 100, 1) }}%</span>
+                            <span class="text-sm font-medium">{{ $normalizedProbs['home'] }}%</span>
                         </div>
                     </div>
                     
@@ -114,9 +117,9 @@
                         <span class="text-sm text-gray-600">Empate</span>
                         <div class="flex items-center space-x-2">
                             <div class="w-24 bg-gray-200 rounded-full h-2">
-                                <div class="bg-yellow-500 h-2 rounded-full" style="width: {{ $match->prediction->draw_probability * 100 }}%"></div>
+                                <div class="bg-yellow-500 h-2 rounded-full" style="width: {{ $normalizedProbs['draw'] }}%"></div>
                             </div>
-                            <span class="text-sm font-medium">{{ number_format($match->prediction->draw_probability * 100, 1) }}%</span>
+                            <span class="text-sm font-medium">{{ $normalizedProbs['draw'] }}%</span>
                         </div>
                     </div>
                     
@@ -124,9 +127,9 @@
                         <span class="text-sm text-gray-600">Victoria Visitante</span>
                         <div class="flex items-center space-x-2">
                             <div class="w-24 bg-gray-200 rounded-full h-2">
-                                <div class="bg-red-600 h-2 rounded-full" style="width: {{ $match->prediction->away_win_probability * 100 }}%"></div>
+                                <div class="bg-red-600 h-2 rounded-full" style="width: {{ $normalizedProbs['away'] }}%"></div>
                             </div>
-                            <span class="text-sm font-medium">{{ number_format($match->prediction->away_win_probability * 100, 1) }}%</span>
+                            <span class="text-sm font-medium">{{ $normalizedProbs['away'] }}%</span>
                         </div>
                     </div>
                 </div>

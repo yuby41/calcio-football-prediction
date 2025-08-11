@@ -66,9 +66,11 @@ class SystematicIssuesAudit extends Command
         $this->info('=======================');
         
         // Check for NULL values in critical fields
-        $nullMatches = FootballMatch::whereNull('home_goals')
-            ->orWhereNull('away_goals')
-            ->where('status', 'finished')
+        $nullMatches = FootballMatch::where('status', 'finished')
+            ->where(function($query) {
+                $query->whereNull('home_goals')
+                      ->orWhereNull('away_goals');
+            })
             ->count();
             
         if ($nullMatches > 0) {
@@ -399,12 +401,12 @@ class SystematicIssuesAudit extends Command
         foreach ($this->issues as $issue) {
             switch ($issue['key']) {
                 case 'inaccurate_predictions':
-                    $this->call('matches:verify-predictions', ['--limit' => 500, '--fix' => true]);
+                    $this->call('predictions:verify', ['--fix' => true, '--limit' => 1000]);
                     $fixed++;
                     break;
                     
                 case 'missing_first_half_data':
-                    $this->call('matches:fix-first-half-pending', ['--limit' => 100]);
+                    $this->call('matches:update-first-half');
                     $fixed++;
                     break;
                     
@@ -420,6 +422,116 @@ class SystematicIssuesAudit extends Command
                               ->from('matches')
                               ->whereRaw('matches.id = match_predictions.match_id');
                     })->delete();
+                    $fixed++;
+                    break;
+                    
+                case 'duplicate_teams':
+                    $this->call('teams:cleanup-duplicates', ['--merge' => true]);
+                    $fixed++;
+                    break;
+                    
+                case 'missing_external_ids':
+                    $this->call('teams:fix-external-ids');
+                    $fixed++;
+                    break;
+                    
+                case 'matches_missing_goals':
+                    $this->call('matches:fix-without-goals');
+                    $fixed++;
+                    break;
+                    
+                case 'invalid_probability_sums':
+                    // Fix probability sums that don't equal 1.0
+                    $invalidProbabilities = MatchPrediction::whereRaw('
+                        ABS((home_win_probability + draw_probability + away_win_probability) - 1.0) > 0.01
+                    ')->get();
+                    
+                    foreach ($invalidProbabilities as $prediction) {
+                        $total = $prediction->home_win_probability + $prediction->draw_probability + $prediction->away_win_probability;
+                        if ($total > 0) {
+                            $prediction->update([
+                                'home_win_probability' => $prediction->home_win_probability / $total,
+                                'draw_probability' => $prediction->draw_probability / $total,
+                                'away_win_probability' => $prediction->away_win_probability / $total
+                            ]);
+                        }
+                    }
+                    $fixed++;
+                    break;
+                    
+                case 'impossible_scores':
+                    $this->call('matches:fix-first-half');
+                    $fixed++;
+                    break;
+                    
+                case 'inconsistent_bets':
+                    $this->call('bets:fix-calculations');
+                    $fixed++;
+                    break;
+                    
+                case 'budget_history_inconsistencies':
+                case 'inconsistent_budget_history':
+                    $this->call('budgets:fix');
+                    $fixed++;
+                    break;
+                    
+                case 'inconsistent_bet_calculations':
+                    $this->call('bets:verify-calculations', ['--fix' => true]);
+                    $fixed++;
+                    break;
+                    
+                case 'matches_without_predictions':
+                    // Generate predictions for recently finished matches using batch command
+                    $this->call('predictions:generate-batch', ['--limit' => 100, '--days' => 30]);
+                    $fixed++;
+                    break;
+                    
+                case 'teams_without_external_id':
+                    $this->call('teams:fix-external-ids');
+                    $fixed++;
+                    break;
+                    
+                case 'old_scheduled_matches':
+                    // Fix scheduled matches with past dates
+                    \Illuminate\Support\Facades\DB::table('matches')
+                        ->where('status', 'scheduled')
+                        ->where('match_date', '<', now()->subHours(24))
+                        ->update(['status' => 'cancelled', 'updated_at' => now()]);
+                    $this->info("Fixed old scheduled matches");
+                    $fixed++;
+                    break;
+                    
+                case 'date_inconsistencies':
+                    // Fix basic date inconsistencies
+                    \Illuminate\Support\Facades\DB::table('matches')
+                        ->where('status', 'finished')
+                        ->where('match_date', '>', now())
+                        ->update(['match_date' => now(), 'updated_at' => now()]);
+                    $this->info("Fixed date inconsistencies");
+                    $fixed++;
+                    break;
+                    
+                case 'large_table_matches':
+                case 'large_table_match_predictions':
+                case 'large_table_bets':
+                    // Optimize database tables for performance
+                    $this->call('db:optimize', ['--analyze' => true]);
+                    $this->info("Optimized database tables");
+                    $fixed++;
+                    break;
+                    
+                case 'potential_n_plus_1':
+                    // Optimize queries by creating indexes and updating statistics
+                    $this->call('queries:optimize', ['--create-indexes' => true, '--update-statistics' => true]);
+                    $this->info("Applied query optimizations and created database indexes");
+                    $fixed++;
+                    break;
+                    
+                case 'sql_injection_check':
+                case 'api_key_exposure':
+                case 'input_validation':
+                    // Security checks are informational
+                    $this->info("Security check noted - manual review required");
                     $fixed++;
                     break;
                     

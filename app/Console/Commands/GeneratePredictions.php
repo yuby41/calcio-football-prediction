@@ -40,21 +40,40 @@ class GeneratePredictions extends Command
                 return Command::FAILURE;
             }
         } else {
-            // Predict upcoming matches
+            // Predict upcoming matches AND live matches (prioritize live)
             $upcomingDays = (int) $this->option('upcoming-days');
-            $matches = FootballMatch::where('status', 'scheduled')
-                ->whereBetween('match_date', [
-                    Carbon::now(),
-                    Carbon::now()->addDays($upcomingDays)
-                ])
-                ->get();
+            $matches = FootballMatch::where(function($query) use ($upcomingDays) {
+                // Include live matches (highest priority)
+                $query->where('status', 'live')
+                      // Include scheduled matches
+                      ->orWhere(function($subQuery) use ($upcomingDays) {
+                          $subQuery->where('status', 'scheduled')
+                                   ->whereBetween('match_date', [
+                                       Carbon::now(),
+                                       Carbon::now()->addDays($upcomingDays)
+                                   ]);
+                      });
+            })
+            // Only get matches without predictions
+            ->whereDoesntHave('prediction')
+            // Order by priority: live first, then scheduled by date
+            ->orderByRaw("CASE status WHEN 'live' THEN 1 WHEN 'scheduled' THEN 2 ELSE 3 END")
+            ->orderBy('match_date')
+            ->get();
             
             if ($matches->isEmpty()) {
                 $this->info('No upcoming matches found for prediction');
                 return Command::SUCCESS;
             }
             
-            $this->info("Found {$matches->count()} upcoming matches");
+            $liveCount = $matches->where('status', 'live')->count();
+            $scheduledCount = $matches->where('status', 'scheduled')->count();
+            
+            $this->info("Found {$matches->count()} matches: {$liveCount} live, {$scheduledCount} scheduled");
+            
+            if ($liveCount > 0) {
+                $this->info("🔴 Prioritizing {$liveCount} live matches");
+            }
             
             $progress = $this->output->createProgressBar($matches->count());
             $progress->start();
