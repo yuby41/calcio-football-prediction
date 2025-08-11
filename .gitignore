@@ -26,3 +26,4 @@ storage/logs/*.log
 ml/models/*.pkl
 ml/venv/
 ml/__pycache__/
+ml_env/
