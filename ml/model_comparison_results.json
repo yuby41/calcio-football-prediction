@@ -1,0 +1,286 @@
+{
+  "comparisons": [
+    {
+      "home_id": 1,
+      "away_id": 2,
+      "predictions": {
+        "simple": {
+          "model": "simple",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.5379999999999999,
+          "home_goals_prediction": 1.18,
+          "away_goals_prediction": 1.0,
+          "both_teams_score_probability": 0.55,
+          "over_2_5_probability": 0.36055507499999995,
+          "model_version": "simple_effective_v1.2",
+          "success": true,
+          "execution_time": 0.6656546592712402
+        },
+        "enhanced": {
+          "model": "enhanced",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.7389,
+          "home_goals_prediction": 2.01,
+          "away_goals_prediction": 1.78,
+          "both_teams_score_probability": 0.7204,
+          "over_2_5_probability": 0.7395,
+          "model_version": "3.0.0-enhanced-outcomes",
+          "success": true,
+          "execution_time": 2.668886661529541
+        },
+        "base": {
+          "model": "base",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.4239,
+          "home_goals_prediction": 2.55,
+          "away_goals_prediction": 2.48,
+          "both_teams_score_probability": 0.8444,
+          "over_2_5_probability": 0.95,
+          "model_version": "2.1.0-ensemble-calibrated",
+          "success": true,
+          "execution_time": 1.8506271839141846
+        },
+        "hybrid": {
+          "model": "hybrid",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.6181,
+          "home_goals_prediction": 1.76,
+          "away_goals_prediction": 1.55,
+          "both_teams_score_probability": 0.6693,
+          "over_2_5_probability": 0.6258,
+          "model_version": "hybrid_ensemble_v1.0",
+          "success": true,
+          "execution_time": 3.020333766937256
+        }
+      }
+    },
+    {
+      "home_id": 3,
+      "away_id": 4,
+      "predictions": {
+        "simple": {
+          "model": "simple",
+          "predicted_outcome": "draw",
+          "confidence_score": 0.55,
+          "home_goals_prediction": 0.75,
+          "away_goals_prediction": 0.6,
+          "both_teams_score_probability": 0.55,
+          "over_2_5_probability": 0.26736060000000006,
+          "model_version": "simple_effective_v1.2",
+          "success": true,
+          "execution_time": 0.5393991470336914
+        },
+        "base": {
+          "model": "base",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.478,
+          "home_goals_prediction": 2.5,
+          "away_goals_prediction": 2.4,
+          "both_teams_score_probability": 0.8348,
+          "over_2_5_probability": 0.95,
+          "model_version": "2.1.0-ensemble-calibrated",
+          "success": true,
+          "execution_time": 1.9463145732879639
+        },
+        "hybrid": {
+          "model": "hybrid",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.6585,
+          "home_goals_prediction": 1.44,
+          "away_goals_prediction": 1.44,
+          "both_teams_score_probability": 0.6467,
+          "over_2_5_probability": 0.5616,
+          "model_version": "hybrid_ensemble_v1.0",
+          "success": true,
+          "execution_time": 2.8966166973114014
+        }
+      }
+    },
+    {
+      "home_id": 5,
+      "away_id": 6,
+      "predictions": {
+        "simple": {
+          "model": "simple",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.536,
+          "home_goals_prediction": 0.64,
+          "away_goals_prediction": 0.8,
+          "both_teams_score_probability": 0.55,
+          "over_2_5_probability": 0.2203400000000001,
+          "model_version": "simple_effective_v1.2",
+          "success": true,
+          "execution_time": 0.4810805320739746
+        },
+        "enhanced": {
+          "model": "enhanced",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.6215,
+          "home_goals_prediction": 1.77,
+          "away_goals_prediction": 1.85,
+          "both_teams_score_probability": 0.6986,
+          "over_2_5_probability": 0.7038,
+          "model_version": "3.0.0-enhanced-outcomes",
+          "success": true,
+          "execution_time": 2.412050247192383
+        },
+        "base": {
+          "model": "base",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.4277,
+          "home_goals_prediction": 2.51,
+          "away_goals_prediction": 2.56,
+          "both_teams_score_probability": 0.848,
+          "over_2_5_probability": 0.95,
+          "model_version": "2.1.0-ensemble-calibrated",
+          "success": true,
+          "execution_time": 2.1430535316467285
+        },
+        "hybrid": {
+          "model": "hybrid",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.5357,
+          "home_goals_prediction": 1.43,
+          "away_goals_prediction": 1.53,
+          "both_teams_score_probability": 0.654,
+          "over_2_5_probability": 0.5588,
+          "model_version": "hybrid_ensemble_v1.0",
+          "success": true,
+          "execution_time": 3.275535821914673
+        }
+      }
+    },
+    {
+      "home_id": 7,
+      "away_id": 8,
+      "predictions": {
+        "simple": {
+          "model": "simple",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.569,
+          "home_goals_prediction": 0.99,
+          "away_goals_prediction": 0.5,
+          "both_teams_score_probability": 0.55,
+          "over_2_5_probability": 0.24071750000000014,
+          "model_version": "simple_effective_v1.2",
+          "success": true,
+          "execution_time": 0.5550105571746826
+        },
+        "enhanced": {
+          "model": "enhanced",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.7819,
+          "home_goals_prediction": 2.08,
+          "away_goals_prediction": 1.28,
+          "both_teams_score_probability": 0.6312,
+          "over_2_5_probability": 0.6475,
+          "model_version": "3.0.0-enhanced-outcomes",
+          "success": true,
+          "execution_time": 2.562645196914673
+        },
+        "base": {
+          "model": "base",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.4474,
+          "home_goals_prediction": 2.46,
+          "away_goals_prediction": 2.38,
+          "both_teams_score_probability": 0.8299,
+          "over_2_5_probability": 0.95,
+          "model_version": "2.1.0-ensemble-calibrated",
+          "success": true,
+          "execution_time": 1.9311199188232422
+        },
+        "hybrid": {
+          "model": "hybrid",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.6483,
+          "home_goals_prediction": 1.75,
+          "away_goals_prediction": 1.05,
+          "both_teams_score_probability": 0.6068,
+          "over_2_5_probability": 0.5255,
+          "model_version": "hybrid_ensemble_v1.0",
+          "success": true,
+          "execution_time": 2.7915704250335693
+        }
+      }
+    },
+    {
+      "home_id": 9,
+      "away_id": 10,
+      "predictions": {
+        "simple": {
+          "model": "simple",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.537,
+          "home_goals_prediction": 0.76,
+          "away_goals_prediction": 0.93,
+          "both_teams_score_probability": 0.55,
+          "over_2_5_probability": 0.24924016885231848,
+          "model_version": "simple_effective_v1.2",
+          "success": true,
+          "execution_time": 0.5756492614746094
+        },
+        "enhanced": {
+          "model": "enhanced",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.7261,
+          "home_goals_prediction": 2.07,
+          "away_goals_prediction": 1.78,
+          "both_teams_score_probability": 0.7265,
+          "over_2_5_probability": 0.7502,
+          "model_version": "3.0.0-enhanced-outcomes",
+          "success": true,
+          "execution_time": 2.195138692855835
+        },
+        "base": {
+          "model": "base",
+          "predicted_outcome": "away_win",
+          "confidence_score": 0.4474,
+          "home_goals_prediction": 2.46,
+          "away_goals_prediction": 2.38,
+          "both_teams_score_probability": 0.8299,
+          "over_2_5_probability": 0.95,
+          "model_version": "2.1.0-ensemble-calibrated",
+          "success": true,
+          "execution_time": 1.897167682647705
+        },
+        "hybrid": {
+          "model": "hybrid",
+          "predicted_outcome": "home_win",
+          "confidence_score": 0.6091,
+          "home_goals_prediction": 1.68,
+          "away_goals_prediction": 1.52,
+          "both_teams_score_probability": 0.6735,
+          "over_2_5_probability": 0.5999,
+          "model_version": "hybrid_ensemble_v1.0",
+          "success": true,
+          "execution_time": 2.9280271530151367
+        }
+      }
+    }
+  ],
+  "model_stats": {
+    "simple": {
+      "predictions": 5,
+      "errors": 0,
+      "total_confidence": 2.73
+    },
+    "enhanced": {
+      "predictions": 4,
+      "errors": 1,
+      "total_confidence": 2.8684000000000003
+    },
+    "base": {
+      "predictions": 5,
+      "errors": 0,
+      "total_confidence": 2.2244
+    },
+    "hybrid": {
+      "predictions": 5,
+      "errors": 0,
+      "total_confidence": 3.0697
+    }
+  },
+  "outcome_agreement": {},
+  "performance_metrics": {}
+}

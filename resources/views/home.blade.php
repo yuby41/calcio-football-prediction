@@ -170,12 +170,12 @@
                                     </div>
                                     <div>
                                         <div class="font-medium mb-1">Ambos Anotan</div>
-                                        <div>{{ $match->prediction->both_teams_score_prediction }}</div>
+                                        <div>{{ $match->prediction->both_teams_score_probability > 0.5 ? 'Sí' : 'No' }}</div>
                                         <div class="text-gray-400">({{ number_format($match->prediction->both_teams_score_probability * 100, 1) }}%)</div>
                                     </div>
                                     <div>
                                         <div class="font-medium mb-1">Total Goles</div>
-                                        <div>{{ $match->prediction->over_25_prediction }}</div>
+                                        <div>{{ $match->prediction->over_2_5_probability > 0.5 ? 'Over 2.5' : 'Under 2.5' }}</div>
                                         <div class="text-gray-400">
                                             Over: {{ number_format($match->prediction->over_2_5_probability * 100, 1) }}%
                                         </div>
@@ -240,11 +240,11 @@
                             @if($match->prediction)
                             <div class="mt-2">
                                 <div class="text-sm text-gray-600">
-                                    Predicción: {{ $match->homeTeam->short_name ?? $match->homeTeam->name }} {{ number_format($match->prediction->home_goals_prediction, 1) }} - 
-                                    {{ number_format($match->prediction->away_goals_prediction, 1) }} {{ $match->awayTeam->short_name ?? $match->awayTeam->name }}
-                                    <span class="ml-2 text-xs text-gray-500">
-                                        ({{ $match->prediction->confidence_level }})
-                                    </span>
+                                    <div class="grid grid-cols-3 gap-2 text-xs">
+                                        <div>Resultado: {{ ucfirst(str_replace('_', ' ', $match->prediction->predicted_outcome)) }}</div>
+                                        <div>Gol: {{ $match->prediction->both_teams_score_probability > 0.5 ? 'Sí' : 'No' }} ({{ number_format($match->prediction->both_teams_score_probability * 100, 1) }}%)</div>
+                                        <div>+2.5: {{ number_format($match->prediction->over_2_5_probability * 100, 1) }}%</div>
+                                    </div>
                                 </div>
                             </div>
                             @endif
@@ -290,11 +290,11 @@
                             @if($match->prediction)
                             <div class="mt-2">
                                 <div class="text-sm text-gray-600">
-                                    Predicción: {{ $match->homeTeam->short_name ?? $match->homeTeam->name }} {{ number_format($match->prediction->home_goals_prediction, 1) }} - 
-                                    {{ number_format($match->prediction->away_goals_prediction, 1) }} {{ $match->awayTeam->short_name ?? $match->awayTeam->name }}
-                                    <span class="ml-2 text-xs text-gray-500">
-                                        ({{ $match->prediction->confidence_level }})
-                                    </span>
+                                    <div class="grid grid-cols-3 gap-2 text-xs">
+                                        <div>Resultado: {{ ucfirst(str_replace('_', ' ', $match->prediction->predicted_outcome)) }}</div>
+                                        <div>Gol: {{ $match->prediction->both_teams_score_probability > 0.5 ? 'Sí' : 'No' }} ({{ number_format($match->prediction->both_teams_score_probability * 100, 1) }}%)</div>
+                                        <div>+2.5: {{ number_format($match->prediction->over_2_5_probability * 100, 1) }}%</div>
+                                    </div>
                                 </div>
                             </div>
                             @endif

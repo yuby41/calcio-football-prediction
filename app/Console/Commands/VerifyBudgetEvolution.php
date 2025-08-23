@@ -152,21 +152,29 @@ class VerifyBudgetEvolution extends Command
             }
         }
         
-        // Final verification
+        // Final verification - check available balance logic
         $this->line('');
         $this->info("📊 SUMMARY");
         $this->line('----------');
         $this->line("Wins: {$totalWins} | Losses: {$totalLosses} | Pending: {$totalPending}");
         $this->line("Total Net Profit: €" . number_format($totalProfit, 2));
-        $this->line("Expected Final Budget: €" . number_format($calculatedBalance, 2));
-        $this->line("Actual Final Budget: €{$budget->current_budget}");
         
-        $budgetDifference = abs($budget->current_budget - $calculatedBalance);
+        // Use the new budget model methods for accurate verification
+        $resolvedBalance = $budget->getBalanceAfterResolvedBets();
+        $pendingAmount = $budget->getPendingBetsAmount();
+        $expectedAvailableBalance = $budget->getAvailableBalance();
+        
+        $this->line("Expected Balance After Resolved Bets: €" . number_format($resolvedBalance, 2));
+        $this->line("Pending Bets Amount: €" . number_format($pendingAmount, 2));
+        $this->line("Expected Available Balance: €" . number_format($expectedAvailableBalance, 2));
+        $this->line("Actual Available Balance: €{$budget->current_budget}");
+        
+        $budgetDifference = abs($budget->current_budget - $expectedAvailableBalance);
         if ($budgetDifference > 0.01) {
-            $this->error("❌ FINAL BUDGET MISMATCH: Difference of €" . number_format($budgetDifference, 2));
-            $issues[] = "Final budget doesn't match calculated evolution";
+            $this->error("❌ AVAILABLE BALANCE MISMATCH: Difference of €" . number_format($budgetDifference, 2));
+            $issues[] = "Available balance doesn't match expected calculation";
         } else {
-            $this->info("✅ BUDGET EVOLUTION CORRECT");
+            $this->info("✅ AVAILABLE BALANCE CORRECT");
         }
         
         // Show issues if any

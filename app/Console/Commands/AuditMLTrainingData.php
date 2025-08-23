@@ -322,7 +322,7 @@ class AuditMLTrainingData extends Command
         // Check for duplicate matches
         $duplicateMatches = DB::select("
             SELECT COUNT(*) as count FROM (
-                SELECT home_team_id, away_team_id, match_date, COUNT(*) as cnt
+                SELECT home_team_id, away_team_id, COUNT(*) as cnt
                 FROM matches 
                 WHERE status = 'finished'
                 GROUP BY home_team_id, away_team_id, DATE(match_date)

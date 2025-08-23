@@ -7,6 +7,7 @@ use App\Models\MatchPrediction;
 use App\Models\FootballMatch;
 use App\Services\StatisticsService;
 use App\Services\SimpleAccuracyService;
+use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 
@@ -18,11 +19,15 @@ class StatisticsController extends Controller
 
     public function index()
     {
-        // Get all prediction statistics
-        $statistics = PredictionStatistic::all()->keyBy('prediction_type');
+        // Get prediction statistics with limits to prevent timeouts
+        $statistics = PredictionStatistic::select('prediction_type', 'total_predictions', 'correct_predictions', 'accuracy_percentage')
+            ->limit(100)
+            ->get()
+            ->keyBy('prediction_type');
         
-        // Get recent performance data for charts
-        $recentMatches = FootballMatch::with('prediction')
+        // Get recent performance data for charts with optimized query
+        $recentMatches = FootballMatch::select('id', 'match_date', 'home_team_id', 'away_team_id', 'home_goals', 'away_goals', 'status')
+            ->with(['prediction:id,match_id,predicted_outcome,confidence_score'])
             ->where('status', 'finished')
             ->whereHas('prediction')
             ->orderBy('match_date', 'desc')
@@ -32,11 +37,104 @@ class StatisticsController extends Controller
         // Calculate overall accuracy using SimpleAccuracyService
         $overallAccuracy = SimpleAccuracyService::getCurrentAccuracy();
 
+        // Display names for prediction types
+        $displayNames = [
+            'match_outcome' => 'Resultado del Partido',
+            'both_teams_score_yes' => 'Ambos Anotan - Sí',
+            'both_teams_score_no' => 'Ambos Anotan - No',
+            'over_2_5' => 'Más de 2.5 Goles',
+            'under_2_5' => 'Menos de 2.5 Goles',
+            'first_half_over_0_5' => '1er Tiempo +0.5 Goles'
+        ];
+
         return view('statistics.index', compact(
             'statistics', 
             'recentMatches', 
-            'overallAccuracy'
+            'overallAccuracy',
+            'displayNames'
         ));
+    }
+
+    public function debugStats()
+    {
+        $statistics = PredictionStatistic::select('prediction_type', 'total_predictions', 'correct_predictions', 'accuracy_percentage')
+            ->get()
+            ->keyBy('prediction_type');
+            
+        return response()->json([
+            'statistics_count' => $statistics->count(),
+            'statistics_data' => $statistics->toArray(),
+            'prediction_types' => $statistics->keys()->toArray()
+        ]);
+    }
+    
+    public function debugView()
+    {
+        // Get exact same data as index() method
+        $statistics = PredictionStatistic::select('prediction_type', 'total_predictions', 'correct_predictions', 'accuracy_percentage')
+            ->limit(100)
+            ->get()
+            ->keyBy('prediction_type');
+            
+        $displayNames = [
+            'match_outcome' => 'Resultado del Partido',
+            'both_teams_score_yes' => 'Ambos Anotan - Sí',
+            'both_teams_score_no' => 'Ambos Anotan - No',
+            'over_2_5' => 'Más de 2.5 Goles',
+            'under_2_5' => 'Menos de 2.5 Goles',
+            'first_half_over_0_5' => '1er Tiempo +0.5 Goles'
+        ];
+        
+        $debugInfo = [];
+        foreach(['match_outcome', 'both_teams_score_yes', 'both_teams_score_no', 'over_2_5', 'under_2_5', 'first_half_over_0_5'] as $type) {
+            $stat = $statistics[$type] ?? null;
+            $debugInfo[$type] = [
+                'stat_exists' => $stat !== null,
+                'display_name' => $displayNames[$type] ?? $type,
+                'accuracy' => $stat ? $stat->accuracy_percentage . '%' : 'N/A',
+                'ratio' => $stat ? $stat->correct_predictions . '/' . $stat->total_predictions : '0/0',
+                'raw_data' => $stat ? $stat->toArray() : null
+            ];
+        }
+        
+        return response()->json([
+            'debug_info' => $debugInfo,
+            'all_statistics' => $statistics->toArray()
+        ]);
+    }
+    
+    public function cardValues()
+    {
+        // Get exact same data as index() method
+        $statistics = PredictionStatistic::select('prediction_type', 'total_predictions', 'correct_predictions', 'accuracy_percentage')
+            ->limit(100)
+            ->get()
+            ->keyBy('prediction_type');
+        
+        $cardData = [];
+        $types = ['match_outcome', 'both_teams_score_yes', 'both_teams_score_no', 'over_2_5', 'under_2_5', 'first_half_over_0_5'];
+        
+        $displayNames = [
+            'match_outcome' => 'Resultado del Partido',
+            'both_teams_score_yes' => 'Ambos Anotan - Sí',
+            'both_teams_score_no' => 'Ambos Anotan - No',
+            'over_2_5' => 'Más de 2.5 Goles',
+            'under_2_5' => 'Menos de 2.5 Goles',
+            'first_half_over_0_5' => '1er Tiempo +0.5 Goles'
+        ];
+        
+        foreach($types as $type) {
+            $stat = $statistics[$type] ?? null;
+            $cardData[] = [
+                'type' => $type,
+                'name' => $displayNames[$type] ?? $type,
+                'percentage' => $stat ? $stat->accuracy_percentage . '%' : 'N/A',
+                'ratio' => $stat ? $stat->correct_predictions . '/' . $stat->total_predictions : '0/0',
+                'has_data' => $stat !== null
+            ];
+        }
+        
+        return response()->json(['cards' => $cardData]);
     }
 
     public function chartData(Request $request)
@@ -44,13 +142,16 @@ class StatisticsController extends Controller
         $type = $request->get('type') ?: 'match_outcome'; // Ensure non-null default
         $period = $request->get('period') ?: 'monthly'; // Ensure non-null default
         
-        $chartData = match($period) {
-            'daily' => $this->getDailyAccuracyData($type),
-            'weekly' => $this->getWeeklyAccuracyData($type),
-            'monthly' => $this->getMonthlyAccuracyData($type),
-            'yearly' => $this->getYearlyAccuracyData($type),
-            default => $this->getMonthlyAccuracyData($type)
-        };
+        $cacheService = app(CacheService::class);
+        $chartData = $cacheService->rememberStatistics("chart:{$type}:{$period}", function () use ($type, $period) {
+            return match($period) {
+                'daily' => $this->getDailyAccuracyData($type),
+                'weekly' => $this->getWeeklyAccuracyData($type),
+                'monthly' => $this->getMonthlyAccuracyData($type),
+                'yearly' => $this->getYearlyAccuracyData($type),
+                default => $this->getMonthlyAccuracyData($type)
+            };
+        });
 
         return response()->json($chartData);
     }
@@ -225,7 +326,8 @@ class StatisticsController extends Controller
         $matches = FootballMatch::with(['prediction', 'homeTeam', 'awayTeam'])
             ->where('status', 'finished')
             ->whereHas('prediction', function($query) {
-                $query->whereNotNull('over_2_5_probability');
+                $query->whereNotNull('over_2_5_probability')
+                      ->where('over_2_5_probability', '>', 0.5); // Solo predicciones Over 2.5
             })
             ->orderBy('match_date', 'desc')
             ->limit(20)
@@ -236,7 +338,7 @@ class StatisticsController extends Controller
         foreach ($matches as $match) {
             $totalGoals = $match->home_goals + $match->away_goals;
             $actualOver25 = $totalGoals > 2.5;
-            $predictedOver25 = $match->prediction->over_2_5_probability > 0.5;
+            $predictedOver25 = true; // Siempre verdadero por el filtro arriba
             $correct = $actualOver25 === $predictedOver25;
 
             $details[] = [
@@ -245,7 +347,7 @@ class StatisticsController extends Controller
                 'score' => $match->home_goals . '-' . $match->away_goals,
                 'total_goals' => $totalGoals,
                 'actual' => $actualOver25 ? 'Sí' : 'No',
-                'predicted' => $predictedOver25 ? 'Sí' : 'No',
+                'predicted' => 'Sí', // Siempre "Sí" porque solo mostramos predicciones Over
                 'confidence' => round($match->prediction->over_2_5_probability * 100, 1) . '%',
                 'correct' => $correct
             ];
@@ -258,8 +360,9 @@ class StatisticsController extends Controller
     {
         $matches = FootballMatch::with(['prediction', 'homeTeam', 'awayTeam'])
             ->where('status', 'finished')
+            ->whereRaw('(home_goals + away_goals) <= 2.5') // Solo partidos que fueron realmente Under 2.5
             ->whereHas('prediction', function($query) {
-                $query->whereNotNull('under_2_5_probability');
+                $query->whereNotNull('over_2_5_probability'); // Usamos over_2_5 porque under se calcula
             })
             ->orderBy('match_date', 'desc')
             ->limit(20)
@@ -269,8 +372,8 @@ class StatisticsController extends Controller
         
         foreach ($matches as $match) {
             $totalGoals = $match->home_goals + $match->away_goals;
-            $actualUnder25 = $totalGoals <= 2.5;
-            $predictedUnder25 = $match->prediction->under_2_5_probability > 0.5;
+            $actualUnder25 = true; // Siempre verdadero por el filtro arriba
+            $predictedUnder25 = $match->prediction->over_2_5_probability <= 0.5; // Under = !Over
             $correct = $actualUnder25 === $predictedUnder25;
 
             $details[] = [
@@ -278,9 +381,9 @@ class StatisticsController extends Controller
                 'date' => $match->match_date->format('d/m/Y'),
                 'score' => $match->home_goals . '-' . $match->away_goals,
                 'total_goals' => $totalGoals,
-                'actual' => $actualUnder25 ? 'Sí' : 'No',
+                'actual' => 'Sí', // Siempre "Sí" porque solo mostramos partidos Under reales
                 'predicted' => $predictedUnder25 ? 'Sí' : 'No',
-                'confidence' => round($match->prediction->under_2_5_probability * 100, 1) . '%',
+                'confidence' => round((1 - $match->prediction->over_2_5_probability) * 100, 1) . '%',
                 'correct' => $correct
             ];
         }
@@ -337,7 +440,7 @@ class StatisticsController extends Controller
         };
     }
 
-    private function getDailyAccuracyData(?string $type = null): array
+    private function getDailyAccuracyData(string $type = 'match_outcome'): array
     {
         $matches = $this->getMatchesForType($type);
         $dailyStats = [];
@@ -377,7 +480,7 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getWeeklyAccuracyData(?string $type = null): array
+    private function getWeeklyAccuracyData(string $type = 'match_outcome'): array
     {
         $matches = $this->getMatchesForType($type);
         $weeklyStats = [];
@@ -417,9 +520,10 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getMonthlyAccuracyData(?string $type = null): array
+    private function getMonthlyAccuracyData(string $type = 'match_outcome'): array
     {
-        $matches = $this->getMatchesForType($type);
+        // For monthly charts, we need ALL historical data in the time range
+        $matches = $this->getAllMatchesForType($type);
         $monthlyStats = [];
 
         foreach ($matches as $match) {
@@ -436,19 +540,31 @@ class StatisticsController extends Controller
             }
         }
 
-        // Get last 12 months
+        // Generate data from oldest to newest (last 24 months max for performance)
         $labels = [];
         $accuracies = [];
         
-        for ($i = 11; $i >= 0; $i--) {
-            $month = Carbon::now()->subMonths($i)->format('Y-m');
-            $labels[] = Carbon::now()->subMonths($i)->format('M Y');
+        // Get date range from actual data
+        $oldestMatch = FootballMatch::whereHas('prediction')->orderBy('match_date')->first();
+        $startDate = $oldestMatch ? $oldestMatch->match_date : Carbon::now()->subMonths(24);
+        
+        // Limit to last 24 months for performance  
+        $startDate = max($startDate, Carbon::now()->subMonths(24));
+        
+        $current = Carbon::parse($startDate)->startOfMonth();
+        $end = Carbon::now()->endOfMonth();
+        
+        while ($current <= $end) {
+            $month = $current->format('Y-m');
+            $labels[] = $current->format('M Y');
             
             if (isset($monthlyStats[$month]) && $monthlyStats[$month]['total'] > 0) {
                 $accuracies[] = round(($monthlyStats[$month]['correct'] / $monthlyStats[$month]['total']) * 100, 1);
             } else {
                 $accuracies[] = null;
             }
+            
+            $current->addMonth();
         }
 
         return [
@@ -457,9 +573,10 @@ class StatisticsController extends Controller
         ];
     }
 
-    private function getYearlyAccuracyData(?string $type = null): array
+    private function getYearlyAccuracyData(string $type = 'match_outcome'): array
     {
-        $matches = $this->getMatchesForType($type);
+        // For yearly data, we need ALL historical data, not just recent matches
+        $matches = $this->getAllMatchesForType($type);
         $yearlyStats = [];
 
         foreach ($matches as $match) {
@@ -479,6 +596,9 @@ class StatisticsController extends Controller
         $labels = [];
         $accuracies = [];
         
+        // Sort by year to ensure chronological order
+        ksort($yearlyStats);
+        
         foreach ($yearlyStats as $year => $stats) {
             $labels[] = $year;
             $accuracies[] = $stats['total'] > 0 ? round(($stats['correct'] / $stats['total']) * 100, 1) : 0;
@@ -495,7 +615,13 @@ class StatisticsController extends Controller
         // Default to match_outcome if type is null
         $type = $type ?: 'match_outcome';
         
-        $query = FootballMatch::with(['prediction', 'homeTeam', 'awayTeam'])
+        // Use select to only get needed fields and limit results to prevent timeouts
+        $query = FootballMatch::select('id', 'match_date', 'home_team_id', 'away_team_id', 'home_goals', 'away_goals', 'status', 'league', 'home_goals_first_half', 'away_goals_first_half')
+            ->with([
+                'prediction:id,match_id,predicted_outcome,both_teams_score_probability,over_2_5_probability,first_half_over_0_5_probability,is_correct,first_half_over_0_5_correct',
+                'homeTeam:id,name', 
+                'awayTeam:id,name'
+            ])
             ->where('status', 'finished')
             ->whereHas('prediction')
             ->whereNotNull('home_goals')
@@ -511,7 +637,7 @@ class StatisticsController extends Controller
             });
         } elseif ($type === 'under_2_5') {
             $query->whereHas('prediction', function($q) {
-                $q->whereNotNull('under_2_5_probability');
+                $q->whereNotNull('over_2_5_probability');
             });
         } elseif ($type === 'first_half_over_0_5') {
             $query->whereHas('prediction', function($q) {
@@ -519,7 +645,53 @@ class StatisticsController extends Controller
             });
         }
 
-        return $query->orderBy('match_date', 'desc')->get();
+        // For chart data, we need more history. Limit based on date range instead
+        // Only limit for recent data calls, not for historical analysis
+        $query->orderBy('match_date', 'desc');
+        
+        // If we're looking at a specific time range for charts, don't limit too aggressively
+        return $query->limit(5000)->get(); // Increased limit for better historical data
+    }
+
+    /**
+     * Get ALL matches for chart data - no limits for historical analysis
+     */
+    private function getAllMatchesForType(?string $type = null)
+    {
+        // Default to match_outcome if type is null
+        $type = $type ?: 'match_outcome';
+        
+        // Get ALL historical data for charts - no limits
+        $query = FootballMatch::select('id', 'match_date', 'home_team_id', 'away_team_id', 'home_goals', 'away_goals', 'status', 'league', 'home_goals_first_half', 'away_goals_first_half')
+            ->with([
+                'prediction:id,match_id,predicted_outcome,both_teams_score_probability,over_2_5_probability,first_half_over_0_5_probability,is_correct,first_half_over_0_5_correct'
+            ])
+            ->where('status', 'finished')
+            ->whereHas('prediction')
+            ->whereNotNull('home_goals')
+            ->whereNotNull('away_goals');
+
+        // Same type filtering as original method
+        if ($type === 'both_teams_score_yes' || $type === 'both_teams_score_no') {
+            $query->whereHas('prediction', function($q) {
+                $q->whereNotNull('both_teams_score_probability');
+            });
+        } elseif ($type === 'over_2_5') {
+            $query->whereHas('prediction', function($q) {
+                $q->whereNotNull('over_2_5_probability');
+            });
+        } elseif ($type === 'under_2_5') {
+            $query->whereHas('prediction', function($q) {
+                $q->whereNotNull('over_2_5_probability');
+            });
+        } elseif ($type === 'first_half_over_0_5') {
+            $query->whereHas('prediction', function($q) {
+                $q->whereNotNull('first_half_over_0_5_probability');
+            });
+        }
+
+        // For historical charts, get ALL data ordered by date (oldest first for chronological display)
+        return $query->orderBy('match_date', 'asc')->get();
     }
 
     private function isPredictionCorrect($match, ?string $type = null): bool
@@ -527,12 +699,12 @@ class StatisticsController extends Controller
         $prediction = $match->prediction;
         
         return match($type ?: 'match_outcome') {
-            'match_outcome' => $prediction->is_correct ?? false,
+            'match_outcome' => $this->isMatchOutcomeCorrect($match),
             'both_teams_score_yes' => $this->isBothTeamsScoreYesCorrect($match),
             'both_teams_score_no' => $this->isBothTeamsScoreNoCorrect($match),
             'over_2_5' => $this->isOver25Correct($match),
             'under_2_5' => $this->isUnder25Correct($match),
-            'first_half_over_0_5' => $prediction->first_half_over_0_5_correct ?? false,
+            'first_half_over_0_5' => $this->isFirstHalfOver05Correct($match),
             default => false
         };
     }
@@ -563,8 +735,52 @@ class StatisticsController extends Controller
     {
         $totalGoals = $match->home_goals + $match->away_goals;
         $actualUnder25 = $totalGoals <= 2.5;
-        $predictedUnder25 = $match->prediction->under_2_5_probability > 0.5;
+        $predictedOver25 = $match->prediction->over_2_5_probability > 0.5;
+        $predictedUnder25 = !$predictedOver25;
         return $actualUnder25 === $predictedUnder25;
+    }
+
+    private function isMatchOutcomeCorrect($match): bool
+    {
+        if (!$match->prediction || is_null($match->home_goals) || is_null($match->away_goals)) {
+            return false;
+        }
+
+        // Determine actual outcome
+        $actualOutcome = '';
+        if ($match->home_goals > $match->away_goals) {
+            $actualOutcome = 'home_win';
+        } elseif ($match->home_goals < $match->away_goals) {
+            $actualOutcome = 'away_win';
+        } else {
+            $actualOutcome = 'draw';
+        }
+
+        return $actualOutcome === $match->prediction->predicted_outcome;
+    }
+
+    private function isFirstHalfOver05Correct($match): bool
+    {
+        // Si no hay predicción o probabilidad, return false
+        if (!$match->prediction || is_null($match->prediction->first_half_over_0_5_probability)) {
+            return false;
+        }
+
+        // Si tenemos datos reales de primer tiempo, calcular dinámicamente
+        if (!is_null($match->home_goals_first_half) && !is_null($match->away_goals_first_half)) {
+            $firstHalfGoals = $match->home_goals_first_half + $match->away_goals_first_half;
+            $actualOver05 = $firstHalfGoals > 0.5;
+            $predictedOver05 = $match->prediction->first_half_over_0_5_probability > 0.5;
+            return $actualOver05 === $predictedOver05;
+        }
+
+        // Si no hay datos de primer tiempo, usar el campo calculado si existe y no es null
+        if (!is_null($match->prediction->first_half_over_0_5_correct)) {
+            return (bool) $match->prediction->first_half_over_0_5_correct;
+        }
+
+        // Como último recurso, return false
+        return false;
     }
 
     private function getFirstHalfOver05Details()

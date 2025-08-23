@@ -110,18 +110,9 @@ class EnhancedFootballPredictor:
         WHERE m.status = 'finished' 
             AND m.home_goals IS NOT NULL 
             AND m.away_goals IS NOT NULL
-            AND m.match_date >= DATE_SUB(NOW(), INTERVAL 2 YEAR)  -- Focus on recent data
-            AND (
-                m.league LIKE '%Premier League%' OR
-                m.league LIKE '%La Liga%' OR 
-                m.league LIKE '%Serie A%' OR
-                m.league LIKE '%Bundesliga%' OR
-                m.league LIKE '%Ligue 1%' OR
-                m.league LIKE '%Champions League%' OR
-                m.league LIKE '%Europa League%'
-            )
-            AND (hts.matches_played >= 5 OR hts.matches_played IS NULL)
-            AND (ats.matches_played >= 5 OR ats.matches_played IS NULL)
+            AND m.match_date >= DATE_SUB(NOW(), INTERVAL 5 YEAR)  -- Expand to 5 years for more data
+            AND (hts.matches_played >= 3 OR hts.matches_played IS NULL)  -- Lower minimum matches
+            AND (ats.matches_played >= 3 OR ats.matches_played IS NULL)
         ORDER BY m.match_date DESC
         """
         
@@ -344,13 +335,9 @@ class EnhancedFootballPredictor:
         df['season_stage'] = df['round'].fillna(1).astype(str).str.extract(r'(\d+)').fillna(1).astype(float)
         df['season_stage_normalized'] = df['season_stage'] / 38  # Assuming max 38 rounds
         
-        # BALANCED Home advantage factor - reduced bias
-        home_advantage_by_league = df.groupby('league').apply(
-            lambda x: (x['home_goals'] > x['away_goals']).mean()
-        ).to_dict()
-        # Normalize home advantage to reduce extreme bias
-        df['league_home_advantage'] = df['league'].map(home_advantage_by_league).fillna(0.5)
-        df['league_home_advantage'] = 0.4 + (df['league_home_advantage'] - 0.5) * 0.3  # Reduce to 40-60% range
+        # REMOVE HOME ADVANTAGE BIAS - Use neutral venue approach
+        # Instead of league home advantage, use only statistical strength differences
+        df['league_home_advantage'] = 0.5  # Neutral - no home bias
         
         # 7. HISTORICAL PERFORMANCE INDICATORS
         # Create lagged features to capture recent form (simplified)
@@ -459,17 +446,24 @@ class EnhancedFootballPredictor:
         
         results = {}
         
-        # 1. OPTIMIZED XGBOOST with outcome-specific tuning
+        # Calculate class weights for balanced training
+        from sklearn.utils.class_weight import compute_class_weight
+        classes = np.unique(y_train_encoded)
+        class_weights = compute_class_weight('balanced', classes=classes, y=y_train_encoded)
+        sample_weights = np.array([class_weights[y] for y in y_train_encoded])
+        
+        # 1. BALANCED XGBOOST with improved hyperparameters
         print("Training XGBoost classifier...")
         xgb_params = {
-            'n_estimators': 300,
-            'learning_rate': 0.03,  # Lower for better generalization
-            'max_depth': 5,         # Increased for more complex patterns
-            'min_child_weight': 3,  # Prevent overfitting
-            'subsample': 0.85,
-            'colsample_bytree': 0.85,
-            'reg_alpha': 0.05,
-            'reg_lambda': 1.5,
+            'n_estimators': 500,       # Increased for better learning
+            'learning_rate': 0.05,     # Slightly higher for faster convergence  
+            'max_depth': 6,            # Deeper trees for complex patterns
+            'min_child_weight': 1,     # More flexible
+            'subsample': 0.9,          # Higher sampling for more data
+            'colsample_bytree': 0.9,   # Higher feature sampling
+            'reg_alpha': 0.01,         # Reduced regularization
+            'reg_lambda': 0.1,         # Reduced regularization
+            'gamma': 0.1,              # Added gamma for pruning
             'random_state': 42,
             'n_jobs': -1,
             'objective': 'multi:softprob',
@@ -477,48 +471,52 @@ class EnhancedFootballPredictor:
         }
         
         xgb_model = xgb.XGBClassifier(**xgb_params)
-        xgb_model.fit(X_train_scaled, y_train_encoded)
+        xgb_model.fit(X_train_scaled, y_train_encoded, sample_weight=sample_weights)
         xgb_pred = xgb_model.predict(X_test_scaled)
         results['xgb_accuracy'] = accuracy_score(y_test_encoded, xgb_pred)
         
-        # 2. LIGHTGBM for diverse perspective
+        # 2. LIGHTGBM with improved parameters
         print("Training LightGBM classifier...")
         lgb_params = {
-            'n_estimators': 300,
-            'learning_rate': 0.03,
-            'max_depth': 6,
-            'num_leaves': 31,
-            'min_child_samples': 20,
-            'subsample': 0.8,
-            'colsample_bytree': 0.8,
-            'reg_alpha': 0.1,
-            'reg_lambda': 1.0,
+            'n_estimators': 500,        # Increased estimators
+            'learning_rate': 0.05,      # Matched with XGBoost
+            'max_depth': 7,             # Deeper trees
+            'num_leaves': 63,           # More leaves for complexity
+            'min_child_samples': 10,    # Lower minimum for flexibility
+            'subsample': 0.9,           # Higher sampling
+            'colsample_bytree': 0.9,    # Higher feature sampling
+            'reg_alpha': 0.01,          # Reduced regularization
+            'reg_lambda': 0.1,          # Reduced regularization
+            'min_split_gain': 0.01,     # Added minimum split gain
             'random_state': 42,
             'n_jobs': -1,
             'objective': 'multiclass',
             'metric': 'multi_logloss',
-            'verbose': -1
+            'verbose': -1,
+            'boost_from_average': False  # Better for imbalanced classes
         }
         
         lgb_model = lgb.LGBMClassifier(**lgb_params)
-        lgb_model.fit(X_train_scaled, y_train_encoded)
+        lgb_model.fit(X_train_scaled, y_train_encoded, sample_weight=sample_weights)
         lgb_pred = lgb_model.predict(X_test_scaled)
         results['lgb_accuracy'] = accuracy_score(y_test_encoded, lgb_pred)
         
         # 3. ENHANCED NEURAL NETWORK for non-linear patterns
         print("Training Neural Network...")
         nn_model = MLPClassifier(
-            hidden_layer_sizes=(100, 50, 25),  # Deep network for complex patterns
+            hidden_layer_sizes=(128, 64, 32, 16),  # Deeper network
             activation='relu',
             solver='adam',
-            alpha=0.001,
+            alpha=0.0001,              # Reduced regularization
             learning_rate='adaptive',
-            learning_rate_init=0.001,
-            max_iter=500,
+            learning_rate_init=0.002,  # Higher initial learning rate
+            max_iter=800,              # More iterations
             random_state=42,
             early_stopping=True,
-            validation_fraction=0.15,
-            n_iter_no_change=20
+            validation_fraction=0.2,   # More validation data
+            n_iter_no_change=30,       # More patience
+            beta_1=0.9,                # Adam parameters
+            beta_2=0.999
         )
         
         nn_model.fit(X_train_scaled, y_train_encoded)
@@ -528,13 +526,15 @@ class EnhancedFootballPredictor:
         # 4. RANDOM FOREST for ensemble diversity
         print("Training Random Forest...")
         rf_model = RandomForestClassifier(
-            n_estimators=200,
-            max_depth=10,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            max_features='sqrt',
+            n_estimators=300,        # More trees
+            max_depth=12,            # Deeper trees
+            min_samples_split=3,     # More flexible splits
+            min_samples_leaf=1,      # More flexible leaves
+            max_features='sqrt',     # Good balance
+            max_samples=0.9,         # Bootstrap sampling
             random_state=42,
-            n_jobs=-1
+            n_jobs=-1,
+            class_weight='balanced'  # Handle class imbalance
         )
         
         rf_model.fit(X_train_scaled, y_train_encoded)
@@ -622,45 +622,14 @@ class EnhancedFootballPredictor:
             conn.close()
         
         if len(stats_df) != 2:
-            # Generate varied default values based on team IDs to avoid identical predictions
-            import hashlib
-            home_hash = int(hashlib.md5(str(home_team_id).encode()).hexdigest()[:6], 16) % 100
-            away_hash = int(hashlib.md5(str(away_team_id).encode()).hexdigest()[:6], 16) % 100
+            # PROFESSIONAL APPROACH: No synthetic data - reject prediction if no real data available
+            missing_teams = []
+            if len(stats_df[stats_df['team_id'] == home_team_id]) == 0:
+                missing_teams.append(f"home team {home_team_id}")
+            if len(stats_df[stats_df['team_id'] == away_team_id]) == 0:
+                missing_teams.append(f"away team {away_team_id}")
             
-            # Generate realistic but varied stats based on team hashes
-            home_strength = (home_hash + 30) / 100  # 0.3 to 1.3 range
-            away_strength = (away_hash + 30) / 100
-            
-            home_matches = 20 + (home_hash % 10)  # 20-29 matches
-            away_matches = 20 + (away_hash % 10)
-            
-            home_wins = max(3, min(int(home_matches * home_strength * 0.45), home_matches - 2))
-            away_wins = max(3, min(int(away_matches * away_strength * 0.45), away_matches - 2))
-            
-            home_draws = max(2, int(home_matches * 0.3))
-            away_draws = max(2, int(away_matches * 0.3))
-            
-            home_losses = home_matches - home_wins - home_draws
-            away_losses = away_matches - away_wins - away_draws
-            
-            home_gf = max(15, int(home_matches * (1.0 + home_strength * 0.8)))
-            away_gf = max(15, int(away_matches * (1.0 + away_strength * 0.8)))
-            
-            home_ga = max(10, int(home_matches * (1.2 - home_strength * 0.4)))
-            away_ga = max(10, int(away_matches * (1.2 - away_strength * 0.4)))
-            
-            stats_df = pd.DataFrame({
-                'team_id': [home_team_id, away_team_id],
-                'matches_played': [home_matches, away_matches],
-                'wins': [home_wins, away_wins],
-                'draws': [home_draws, away_draws],
-                'losses': [home_losses, away_losses],
-                'goals_for': [home_gf, away_gf],
-                'goals_against': [home_ga, away_ga],
-                'avg_goals_for': [home_gf / home_matches, away_gf / away_matches],
-                'avg_goals_against': [home_ga / home_matches, away_ga / away_matches],
-                'points': [home_wins * 3 + home_draws, away_wins * 3 + away_draws]
-            })
+            raise ValueError(f"Cannot make professional prediction: missing real statistics for {', '.join(missing_teams)}. Enhanced model requires actual team performance data.")
         
         home_stats = stats_df[stats_df['team_id'] == home_team_id].iloc[0] if len(stats_df[stats_df['team_id'] == home_team_id]) > 0 else stats_df.iloc[0]
         away_stats = stats_df[stats_df['team_id'] == away_team_id].iloc[0] if len(stats_df[stats_df['team_id'] == away_team_id]) > 0 else stats_df.iloc[1]
@@ -698,18 +667,8 @@ class EnhancedFootballPredictor:
         confidence = max(ensemble_proba)
         predicted_outcome = outcome_classes[np.argmax(ensemble_proba)]
         
-        # OPTIMAL DRAW PREDICTION: Target ~20% draw rate
-        draw_index = np.where(outcome_classes == 'draw')[0][0]
-        home_index = np.where(outcome_classes == 'home_win')[0][0]
-        away_index = np.where(outcome_classes == 'away_win')[0][0]
-        
-        # Predict draw if:
-        # 1. Draw probability > 30% OR
-        # 2. Draw probability > 25% AND the match is close (home/away probs within 0.15)
-        close_match = abs(ensemble_proba[home_index] - ensemble_proba[away_index]) < 0.15
-        if ensemble_proba[draw_index] > 0.30 or (ensemble_proba[draw_index] > 0.25 and close_match):
-            predicted_outcome = 'draw'
-            confidence = ensemble_proba[draw_index]
+        # Let ensemble naturally decide outcome - no forced draw logic
+        # The balanced training should naturally produce realistic distributions
         
         # ENHANCED ML-based goal predictions using compatible feature subset
         try:
@@ -751,14 +710,22 @@ class EnhancedFootballPredictor:
         except Exception as e:
             # Fallback to enhanced statistical method if ML models fail
             print(f"Warning: Using fallback goal prediction due to: {e}")
-            # More sophisticated fallback using form and strength
-            home_attack_strength = home_stats['avg_goals_for'] / max(0.5, away_stats['avg_goals_against'])
-            away_attack_strength = away_stats['avg_goals_for'] / max(0.5, home_stats['avg_goals_against'])
+            # FIXED: More sophisticated fallback using correct formula
+            home_attack_strength = home_stats['avg_goals_for']
+            away_attack_strength = away_stats['avg_goals_for']
+            home_defense_strength = home_stats['avg_goals_against']
+            away_defense_strength = away_stats['avg_goals_against']
             
-            # Apply league average and home advantage
-            league_avg = 1.35  # Typical goals per team per match
-            home_goals_pred = max(0, home_attack_strength * league_avg * 1.02)  # Small home advantage
-            away_goals_pred = max(0, away_attack_strength * league_avg * 0.99)  # Small away disadvantage
+            # PROFESSIONAL: Conservative expected goals for realistic predictions
+            league_avg = 1.3  # Realistic average goals per team per match
+            # Tight bounds for professional football - most teams score 0.5-2.5 goals
+            home_attack_ratio = max(0.7, min(1.4, home_attack_strength / league_avg))  # Conservative range
+            away_defense_ratio = max(0.8, min(1.3, league_avg / away_defense_strength))  # Tight defense range
+            home_goals_pred = max(0.5, min(2.5, home_attack_ratio * away_defense_ratio * league_avg * 0.6 + 0.2))  # Reduced multiplier
+            
+            away_attack_ratio = max(0.7, min(1.4, away_attack_strength / league_avg))
+            home_defense_ratio = max(0.8, min(1.3, league_avg / home_defense_strength))
+            away_goals_pred = max(0.4, min(2.2, away_attack_ratio * home_defense_ratio * league_avg * 0.55))  # Away handicap
         
         # Calculate additional predictions with enhanced logic
         total_goals_pred = home_goals_pred + away_goals_pred
@@ -768,8 +735,8 @@ class EnhancedFootballPredictor:
         away_no_goals_prob = np.exp(-away_goals_pred) 
         both_teams_score_prob = 1 - (home_no_goals_prob + away_no_goals_prob - home_no_goals_prob * away_no_goals_prob)
         
-        # Enhanced over/under calculation
-        over_25_prob = max(0.05, min(0.95, (total_goals_pred - 2.0) / 2.5 + 0.5))
+        # Enhanced over/under calculation - FIXED for realistic probabilities
+        over_25_prob = max(0.15, min(0.85, 1 / (1 + np.exp(-(total_goals_pred - 2.75)))))
         under_25_prob = 1 - over_25_prob
         
         # FIRST HALF PREDICTIONS (Enhanced calculation)
@@ -783,8 +750,8 @@ class EnhancedFootballPredictor:
         first_half_no_goals_prob = np.exp(-total_first_half_pred)  # P(0 goals)
         first_half_over_05_prob = 1 - first_half_no_goals_prob
         
-        # Apply some realism bounds (first half goals are less predictable)
-        first_half_over_05_prob = max(0.25, min(0.85, first_half_over_05_prob))
+        # Apply realistic bounds for first half predictions
+        first_half_over_05_prob = max(0.40, min(0.80, first_half_over_05_prob))
         
         return {
             'home_goals_prediction': float(round(home_goals_pred, 2)),
@@ -847,7 +814,7 @@ class EnhancedFootballPredictor:
             home_stats['avg_goals_for'] / (away_stats['avg_goals_against'] + 0.5),  # attack_strength_home
             away_stats['avg_goals_for'] / (home_stats['avg_goals_against'] + 0.5),  # defense_strength_home
             away_stats['avg_goals_for'] / (home_stats['avg_goals_against'] + 0.5),  # attack_strength_away
-            home_stats['avg_goals_for'] / (away_stats['avg_goals_against'] + 0.5),  # defense_strength_away
+            away_stats['avg_goals_against'] / (home_stats['avg_goals_for'] + 0.5),  # defense_strength_away - FIXED
             
             # Additional enhanced features (with safe defaults)
             0.0,  # home_overall_strength

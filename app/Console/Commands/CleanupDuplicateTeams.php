@@ -80,13 +80,16 @@ class CleanupDuplicateTeams extends Command
                     continue; // Skip deletion if there are matches and no merge flag
                 }
                 
-                // Delete the duplicate team
+                // Delete the duplicate team and related data
                 if (!$dryRun) {
+                    // Delete related team statistics first
+                    DB::table('team_statistics')->where('team_id', $duplicate->id)->delete();
+                    
                     $duplicate->delete();
-                    $this->info("    ✅ Equipo duplicado eliminado");
+                    $this->info("    ✅ Equipo duplicado eliminado (incluyendo estadísticas)");
                     $totalCleaned++;
                 } else {
-                    $this->warn("    🔍 DRY RUN: Equipo se eliminaría");
+                    $this->warn("    🔍 DRY RUN: Equipo se eliminaría (incluyendo estadísticas)");
                 }
             }
         }

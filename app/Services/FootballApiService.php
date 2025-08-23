@@ -187,6 +187,7 @@ class FootballApiService
             $fixture = $matchData['fixture'] ?? $matchData;
             $teams = $matchData['teams'] ?? [];
             $goals = $matchData['goals'] ?? [];
+            $score = $matchData['score'] ?? [];
             $league = $matchData['league'] ?? [];
             
             // La API v3.football.api-sports.io devuelve fechas en UTC, convertimos a zona horaria local
@@ -209,6 +210,8 @@ class FootballApiService
                 'match_date' => $matchDate,
                 'home_goals' => $goals['home'] ?? null,
                 'away_goals' => $goals['away'] ?? null,
+                'home_goals_first_half' => $score['halftime']['home'] ?? null,
+                'away_goals_first_half' => $score['halftime']['away'] ?? null,
                 'status' => $this->mapMatchStatus($fixture['status']['short']),
                 'league' => $league['name'] ?? null,
                 'season' => $league['season'] ?? date('Y'),

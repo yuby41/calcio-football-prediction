@@ -210,11 +210,27 @@ class VerifyMLEnvironment extends Command
     {
         $this->info("🧪 Realizando test de predicción...");
         
+        // Get two teams with actual match data
+        $team1 = \App\Models\Team::whereHas('homeMatches', function($q) { 
+            $q->where('status', 'finished')->whereNotNull('home_goals'); 
+        })->first();
+        
+        $team2 = \App\Models\Team::whereHas('awayMatches', function($q) { 
+            $q->where('status', 'finished')->whereNotNull('away_goals'); 
+        })->where('id', '!=', $team1->id ?? 0)->first();
+        
+        if (!$team1 || !$team2) {
+            $this->warn("⚠️  No se encontraron equipos con estadísticas suficientes para el test");
+            return;
+        }
+        
         $basePath = base_path();
         $mlPath = base_path('ml');
         
+        $this->line("   Equipos test: {$team1->name} vs {$team2->name}");
+        
         $process = Process::fromShellCommandline(
-            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$mlPath}/enhanced_football_predictor.py predict 3430 4775'"
+            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$mlPath}/enhanced_football_predictor.py predict {$team1->id} {$team2->id}'"
         );
         $process->setTimeout(30);
         $process->run();

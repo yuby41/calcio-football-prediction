@@ -116,15 +116,17 @@ class ResolvePendingBets extends Command
                     'resolved_at' => now(),
                 ]);
 
-                // Update budget configuration usando BudgetHistory (método correcto)
+                // Update budget configuration using new available balance logic
                 if ($bet->budgetConfiguration) {
                     $budget = $bet->budgetConfiguration;
                     $oldBudget = $budget->current_budget;
-                    $newBudget = $oldBudget + $result['profit'];
+                    
+                    // Use the new budget method to properly handle bet resolution
+                    $budget->resolveBet($bet->amount, $result['profit']);
+                    $newBudget = $budget->current_budget;
                     
                     $this->line("   📊 Presupuesto: €{$oldBudget} → €" . number_format($newBudget, 2));
                     
-                    $budget->update(['current_budget' => $newBudget]);
                     $bet->update(['budget_after' => $newBudget]);
 
                     // CREAR REGISTRO EN BUDGETHISTORY (método correcto)

@@ -57,6 +57,11 @@ class Kernel extends ConsoleKernel
         $schedule->command('budget:check-target-profit --fix')
                  ->everyThirtyMinutes()
                  ->withoutOverlapping();
+                 
+        // 🔄 BUDGET AVAILABLE BALANCE SYNC (Every hour to ensure correct available balances)
+        $schedule->command('budgets:sync-available-balances')
+                 ->hourly()
+                 ->withoutOverlapping();
 
         // ⚽ MATCH RESULTS UPDATE (Every 30 minutes)
         $schedule->command('matches:update-results')

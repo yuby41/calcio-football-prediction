@@ -67,7 +67,7 @@
                         </div>
                         <div class="ml-5 w-0 flex-1">
                             <dl>
-                                <dt class="text-sm font-medium text-gray-500 truncate transition-colors duration-300 group-hover:text-{{ $color }}-600">{{ $stat->display_name ?? 'N/A' }}</dt>
+                                <dt class="text-sm font-medium text-gray-500 truncate transition-colors duration-300 group-hover:text-{{ $color }}-600">{{ $displayNames[$type] ?? $type }}</dt>
                                 <dd class="text-lg font-medium text-gray-900 transition-colors duration-300 group-hover:text-{{ $color }}-700">
                                     {{ $stat ? $stat->accuracy_percentage . '%' : 'N/A' }}
                                 </dd>
@@ -110,7 +110,7 @@
                         </div>
                         <div class="ml-5 w-0 flex-1">
                             <dl>
-                                <dt class="text-sm font-medium text-gray-500 truncate transition-colors duration-300 group-hover:text-{{ $color }}-600">{{ $stat->display_name ?? 'N/A' }}</dt>
+                                <dt class="text-sm font-medium text-gray-500 truncate transition-colors duration-300 group-hover:text-{{ $color }}-600">{{ $displayNames[$type] ?? $type }}</dt>
                                 <dd class="text-lg font-medium text-gray-900 transition-colors duration-300 group-hover:text-{{ $color }}-700">
                                     {{ $stat ? $stat->accuracy_percentage . '%' : 'N/A' }}
                                 </dd>
@@ -136,7 +136,7 @@
                 <div class="px-6 py-4 border-b border-gray-200">
                     <div class="flex justify-between items-center">
                         <h3 class="text-lg leading-6 font-medium text-gray-900">
-                            {{ $stat->display_name }} - <span id="period-title-{{ $type }}">Evolución Mensual</span>
+                            {{ $displayNames[$type] ?? $type }} - <span id="period-title-{{ $type }}">Evolución Mensual</span>
                         </h3>
                         <div class="flex space-x-1">
                             <button class="period-btn active px-2 py-1 text-xs bg-blue-500 text-white rounded" 

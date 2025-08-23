@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\FootballMatch;
 use App\Models\MatchPrediction;
+use App\Constants\PredictionConstants;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
 use Carbon\Carbon;
@@ -55,14 +56,35 @@ class PredictionService
                 return true;
             }
             
-            // PRIORITY: Use new Simple Effective Predictor (better accuracy)
-            Log::info("Using Simple Effective Predictor for match {$match->id}");
-            $predictionData = $this->predictWithSimpleEffectiveModel($match);
+            // Get active model from configuration
+            $activeModel = $this->getActiveModel();
+            Log::info("Using {$activeModel} model for match {$match->id}");
+            
+            $predictionData = null;
+            
+            // Route to appropriate prediction method based on active model
+            switch ($activeModel) {
+                case 'enhanced':
+                    $predictionData = $this->predictWithEnhancedModel($match);
+                    break;
+                case 'simple':
+                    $predictionData = $this->predictWithSimpleModel($match);
+                    break;
+                case 'ensemble':
+                    $predictionData = $this->predictWithEnsembleModel($match);
+                    break;
+                default:
+                    Log::warning("Unknown model '{$activeModel}', using fallback");
+                    $predictionData = $this->createFallbackPrediction($match);
+                    break;
+            }
             
             // Fallback to statistical prediction if needed
             if (!$predictionData) {
-                Log::warning("Simple predictor failed for match {$match->id}, using statistical fallback");
+                Log::warning("{$activeModel} predictor failed for match {$match->id}, using statistical fallback");
                 $predictionData = $this->createFallbackPrediction($match);
+            } else {
+                Log::info("{$activeModel} predictor succeeded for match {$match->id}");
             }
             
             if ($predictionData && is_array($predictionData)) {
@@ -142,15 +164,19 @@ class PredictionService
         $pythonPath = "/home/yualbe/.local/lib/python3.12/site-packages:/usr/lib/python3/dist-packages:/usr/local/lib/python3.12/dist-packages";
         
         // Usar únicamente el entorno virtual configurado definitivamente
-        $basePath = base_path();
+        $basePath = escapeshellarg(base_path());
+        $mlPathEscaped = escapeshellarg($mlPath);
+        $homeTeamId = (int) $match->home_team_id; // Sanitize to integer
+        $awayTeamId = (int) $match->away_team_id; // Sanitize to integer
+        
         $commands = [
-            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$mlPath}/enhanced_football_predictor.py predict {$match->home_team_id} {$match->away_team_id}'"
+            "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && python {$mlPathEscaped}/enhanced_football_predictor.py predict {$homeTeamId} {$awayTeamId}")
         ];
         
         foreach ($commands as $command) {
             try {
                 $process = Process::fromShellCommandline($command);
-                $process->setTimeout(45); // Longer timeout for enhanced models
+                $process->setTimeout(PredictionConstants::ML_PREDICTION_TIMEOUT);
                 $process->run();
                 
                 if ($process->isSuccessful()) {
@@ -239,61 +265,25 @@ class PredictionService
     
     private function createFallbackPrediction(FootballMatch $match): array
     {
-        // Get team statistics - prioritize historical data for better predictions
-        // Since current season (2025) has limited data, use 2023-2024 seasons primarily
-        $homeStats = $match->homeTeam->statistics()->where('season', '2023')->first();
-        $awayStats = $match->awayTeam->statistics()->where('season', '2023')->first();
-        
-        // Fallback to 2024 if 2023 not available
-        if (!$homeStats) {
-            $homeStats = $match->homeTeam->statistics()->where('season', '2024')->first();
-        }
-        if (!$awayStats) {
-            $awayStats = $match->awayTeam->statistics()->where('season', '2024')->first();
-        }
-        
-        // Last resort: current season (but this will have very limited data)
-        if (!$homeStats) {
-            $homeStats = $match->homeTeam->statistics()->where('season', date('Y'))->first();
-        }
-        if (!$awayStats) {
-            $awayStats = $match->awayTeam->statistics()->where('season', date('Y'))->first();
-        }
+        // Get team statistics using prioritized seasons
+        $homeStats = $this->getTeamStatistics($match->homeTeam);
+        $awayStats = $this->getTeamStatistics($match->awayTeam);
         
         // Calculate team strength indicators
         $homeStrength = $this->calculateTeamStrength($homeStats, $match->homeTeam);
         $awayStrength = $this->calculateTeamStrength($awayStats, $match->awayTeam);
         
-        
-        // Home advantage factor (adaptive based on team quality difference)
+        // Calculate home advantage based on team quality difference
         $qualityDiff = abs($homeStrength - $awayStrength);
-        // Reduce home advantage when away team is significantly stronger
         $homeAdvantage = $awayStrength > $homeStrength ? 
-            max(0.03, 0.08 - ($qualityDiff * 0.15)) : // Reduce if away team stronger
-            0.08; // Normal home advantage
+            max(0.03, PredictionConstants::HOME_ADVANTAGE_WEIGHT - ($qualityDiff * 0.15)) : 
+            PredictionConstants::HOME_ADVANTAGE_WEIGHT;
         
-        // Calculate strength difference with home advantage
-        $strengthDiff = ($homeStrength + $homeAdvantage) - $awayStrength;
-        
-        // More balanced probability calculation (much less extreme results)
-        // Using a very gentle logistic function for realistic football predictions
-        $homeWinProb = 1 / (1 + exp(-$strengthDiff * 3.5)); // Much gentler curve
-        $awayWinProb = 1 / (1 + exp($strengthDiff * 3.5));
-        
-        // Draw probability increases for closer matches and is more prominent
-        $competitiveness = max(0, 1 - abs($strengthDiff) * 2); // Penalize large differences
-        $drawProb = 0.20 + ($competitiveness * 0.18); // Base 20% + up to 18% more for close matches
-        
-        // Ensure minimum probabilities for realism
-        $homeWinProb = max(0.05, $homeWinProb); // Minimum 5%
-        $awayWinProb = max(0.05, $awayWinProb); // Minimum 5%  
-        $drawProb = max(0.15, $drawProb); // Minimum 15%
-        
-        // Normalize probabilities
-        $total = $homeWinProb + $drawProb + $awayWinProb;
-        $homeWinProb /= $total;
-        $drawProb /= $total;
-        $awayWinProb /= $total;
+        // Get outcome probabilities using extracted method
+        $outcomeProbabilities = $this->calculateMatchOutcomeProbabilities($homeStrength, $awayStrength, $homeAdvantage);
+        $homeWinProb = $outcomeProbabilities['home_win'];
+        $awayWinProb = $outcomeProbabilities['away_win'];
+        $drawProb = $outcomeProbabilities['draw'];
         
         // Goal predictions based on team attacking/defensive stats with league normalization
         $homeGoalsAvg = $homeStats ? $homeStats->avg_goals_for : $this->getDefaultGoalsFor($match->homeTeam);
@@ -301,24 +291,26 @@ class PredictionService
         $homeConcedeAvg = $homeStats ? $homeStats->avg_goals_against : $this->getDefaultGoalsAgainst($match->homeTeam);
         $awayConcedeAvg = $awayStats ? $awayStats->avg_goals_against : $this->getDefaultGoalsAgainst($match->awayTeam);
         
-        // More sophisticated expected goals calculation using attack vs defense strength
-        $homeAttackStrength = $homeGoalsAvg / max(0.5, $awayConcedeAvg); // Attack vs away defense
-        $awayAttackStrength = $awayGoalsAvg / max(0.5, $homeConcedeAvg); // Attack vs home defense
+        // FIXED: More sophisticated expected goals calculation using correct formula
+        $homeAttackStrength = $homeGoalsAvg;
+        $awayAttackStrength = $awayGoalsAvg;
+        $homeDefenseStrength = $homeConcedeAvg;
+        $awayDefenseStrength = $awayConcedeAvg;
         
         // League average goals per game (realistic baseline)
-        $leagueAvgGoals = 1.3; // Premier League average per team per game
+        $leagueAvgGoals = 1.35; // Unified with ML scripts
         
-        // Expected goals with strength-based calculation
-        $homeExpectedGoals = $leagueAvgGoals * $homeAttackStrength * (1 + $homeAdvantage);
-        $awayExpectedGoals = $leagueAvgGoals * $awayAttackStrength;
+        // FIXED: Expected goals using correct attack vs defense formula
+        $homeExpectedGoals = ($homeAttackStrength / max(0.5, $awayDefenseStrength)) * $leagueAvgGoals + 0.35; // Home advantage
+        $awayExpectedGoals = ($awayAttackStrength / max(0.5, $homeDefenseStrength)) * $leagueAvgGoals;
         
         // Apply realistic bounds and reduce extreme predictions
         $homeGoals = max(0.5, min(3.5, $homeExpectedGoals));
         $awayGoals = max(0.5, min(3.5, $awayExpectedGoals));
         
-        // Determine predicted outcome
+        // Determine predicted outcome using extracted method
         $outcomes = ['home_win' => $homeWinProb, 'draw' => $drawProb, 'away_win' => $awayWinProb];
-        $predictedOutcome = array_keys($outcomes, max($outcomes))[0];
+        $predictedOutcome = $this->determinePredictedOutcome($outcomes);
         
         // Both teams to score calculation
         $homeScoreProb = 1 - exp(-$homeGoals * 0.8);
@@ -342,14 +334,9 @@ class PredictionService
         $maxProbability = max($homeWinProb, $drawProb, $awayWinProb);
         $dataQuality = ($homeStats && $awayStats) ? 0.8 : 0.5;
         
-        // Base confidence on the winning probability (higher when more certain)
-        $probabilityCertainty = $maxProbability; // 0.33 (equal) to ~0.7 (strong favorite)
-        
-        // Confidence calculation - more realistic range
-        $confidence = ($dataQuality * 0.4) + ($probabilityCertainty * 0.6);
-        
-        // Apply realistic bounds: 45% to 80% (never too low or too high)
-        $confidence = max(0.45, min(0.80, $confidence));
+        // Calculate confidence using extracted method
+        $confidence = $this->calculateConfidenceScore($outcomes, $homeStrength, $awayStrength);
+        $confidence = $confidence / 100; // Convert to decimal for compatibility
         
         return [
             'home_goals_prediction' => round($homeGoals, 2),
@@ -419,21 +406,97 @@ class PredictionService
     }
     
     /**
-     * NEW: Simple Effective Predictor - Target >52% accuracy
-     * Replaces complex ML models with proven statistical approach
+     * Get the active ML model from configuration
      */
-    private function predictWithSimpleEffectiveModel(FootballMatch $match): ?array
+    private function getActiveModel(): string
+    {
+        $configPath = config_path('ml_models.php');
+        
+        if (!file_exists($configPath)) {
+            // Default to enhanced if no config exists
+            return 'enhanced';
+        }
+        
+        $config = include $configPath;
+        return $config['active_model'] ?? 'enhanced';
+    }
+    
+    /**
+     * Get model configuration
+     */
+    private function getModelConfig(): array
+    {
+        $configPath = config_path('ml_models.php');
+        
+        if (!file_exists($configPath)) {
+            return [];
+        }
+        
+        return include $configPath;
+    }
+    
+    /**
+     * Predict with Enhanced ML Model (XGBoost + LightGBM + NN + RF ensemble)
+     */
+    private function predictWithEnhancedModel(FootballMatch $match): ?array
+    {
+        try {
+            $basePath = base_path();
+            $pythonScript = $basePath . '/ml/enhanced_football_predictor.py';
+            
+            if (!file_exists($pythonScript)) {
+                Log::warning("Enhanced predictor script not found at: {$pythonScript}");
+                return null;
+            }
+            
+            // Check if models are trained
+            if (!$this->hasEnhancedModels()) {
+                Log::warning("Enhanced models not trained for match {$match->id}");
+                return null;
+            }
+            
+            $command = "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}'";
+            
+            $process = Process::fromShellCommandline($command);
+            $process->setTimeout(45);
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                Log::warning("Enhanced predictor failed for match {$match->id}. Error: " . $process->getErrorOutput());
+                return null;
+            }
+            
+            $output = $process->getOutput();
+            $result = json_decode($output, true);
+            
+            if (!$result || !isset($result['home_goals_prediction'])) {
+                Log::warning("Invalid response from enhanced predictor for match {$match->id}. Output: " . $output);
+                return null;
+            }
+            
+            Log::info("Enhanced predictor result for match {$match->id}: " . json_encode($result));
+            return $this->formatPredictionResult($result, 'enhanced');
+            
+        } catch (\Exception $e) {
+            Log::error("Exception in Enhanced Predictor for match {$match->id}: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Predict with Simple Statistical Model
+     */
+    private function predictWithSimpleModel(FootballMatch $match): ?array
     {
         try {
             $basePath = base_path();
             $pythonScript = $basePath . '/ml/simple_effective_predictor.py';
             
             if (!file_exists($pythonScript)) {
-                Log::warning("Simple effective predictor script not found at: {$pythonScript}");
+                Log::warning("Simple predictor script not found at: {$pythonScript}");
                 return null;
             }
             
-            // Use the configured ML environment
             $command = "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$pythonScript} {$match->home_team_id} {$match->away_team_id}'";
             
             $process = Process::fromShellCommandline($command);
@@ -441,7 +504,7 @@ class PredictionService
             $process->run();
             
             if (!$process->isSuccessful()) {
-                Log::warning("Simple effective predictor failed for match {$match->id}. Error: " . $process->getErrorOutput());
+                Log::warning("Simple predictor failed for match {$match->id}. Error: " . $process->getErrorOutput());
                 return null;
             }
             
@@ -449,36 +512,262 @@ class PredictionService
             $result = json_decode($output, true);
             
             if (!$result || !isset($result['success']) || !$result['success']) {
-                Log::warning("Invalid response from simple effective predictor for match {$match->id}");
+                Log::warning("Invalid response from simple predictor for match {$match->id}");
                 return null;
             }
             
-            $predictions = $result['predictions'];
-            $outcomeData = $predictions['match_outcome'];
-            $overUnder = $predictions['over_under_2_5'];
-            $firstHalf = $predictions['first_half_over_0_5'];
+            return $this->formatSimplePredictionResult($result['predictions'], 'simple');
             
-            // Map to database format
+        } catch (\Exception $e) {
+            Log::error("Exception in Simple Predictor for match {$match->id}: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Predict with Ensemble Model (combines Enhanced + Simple)
+     */
+    private function predictWithEnsembleModel(FootballMatch $match): ?array
+    {
+        try {
+            // Get predictions from both models
+            $enhancedResult = $this->predictWithEnhancedModel($match);
+            $simpleResult = $this->predictWithSimpleModel($match);
+            
+            // If only one works, use that one
+            if ($enhancedResult && !$simpleResult) {
+                $enhancedResult['model_version'] = 'ensemble_enhanced_only';
+                return $enhancedResult;
+            }
+            
+            if ($simpleResult && !$enhancedResult) {
+                $simpleResult['model_version'] = 'ensemble_simple_only';
+                return $simpleResult;
+            }
+            
+            // If both failed, return null
+            if (!$enhancedResult || !$simpleResult) {
+                Log::warning("Both models failed for ensemble prediction of match {$match->id}");
+                return null;
+            }
+            
+            // Combine both results with weighting (Enhanced: 70%, Simple: 30%)
+            return $this->combineModelResults($enhancedResult, $simpleResult, 0.7, 0.3);
+            
+        } catch (\Exception $e) {
+            Log::error("Exception in Ensemble Predictor for match {$match->id}: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Format prediction result for database storage
+     */
+    private function formatPredictionResult(array $result, string $modelType): array
+    {
+        return [
+            'predicted_outcome' => $result['predicted_outcome'],
+            'confidence_score' => $result['confidence_score'] ?? 0.5,
+            'model_version' => $result['model_version'] ?? $modelType,
+            
+            // Goals predictions
+            'home_goals_prediction' => $result['home_goals_prediction'] ?? 1.5,
+            'away_goals_prediction' => $result['away_goals_prediction'] ?? 1.2,
+            
+            // Probabilities
+            'home_win_probability' => $result['home_win_probability'] ?? 0.33,
+            'draw_probability' => $result['draw_probability'] ?? 0.33,
+            'away_win_probability' => $result['away_win_probability'] ?? 0.33,
+            'both_teams_score_probability' => $result['both_teams_score_probability'] ?? 0.5,
+            'over_2_5_probability' => $result['over_2_5_probability'] ?? 0.5,
+            'under_2_5_probability' => $result['under_2_5_probability'] ?? 0.5,
+            'first_half_over_0_5_probability' => $result['first_half_over_0_5_probability'] ?? 0.6,
+            
+            // Derived predictions
+            'over_2_5_prediction' => ($result['over_2_5_probability'] ?? 0.5) > 0.5,
+            'over_2_5_confidence' => $result['over_2_5_probability'] ?? 0.5,
+            'over_0_5_first_half_prediction' => ($result['first_half_over_0_5_probability'] ?? 0.6) > 0.5,
+            'first_half_confidence' => $result['first_half_over_0_5_probability'] ?? 0.6,
+            'both_teams_score_prediction' => ($result['both_teams_score_probability'] ?? 0.5) > 0.5,
+            'both_teams_score_confidence' => $result['both_teams_score_probability'] ?? 0.5,
+            
+            // Metadata
+            'prediction_type' => 'main_outcome',
+            'created_at' => now(),
+            'updated_at' => now()
+        ];
+    }
+    
+    /**
+     * Format simple prediction result for database storage
+     */
+    private function formatSimplePredictionResult(array $predictions, string $modelType): array
+    {
+        $matchOutcome = $predictions['match_outcome'];
+        $overUnder = $predictions['over_under_2_5'];
+        $firstHalf = $predictions['first_half_over_0_5'];
+        
+        return [
+            'predicted_outcome' => $matchOutcome['predicted_outcome'],
+            'confidence_score' => $matchOutcome['confidence'] / 100.0,
+            'model_version' => $matchOutcome['model_version'] ?? $modelType,
+            
+            // Goals predictions
+            'home_goals_prediction' => $matchOutcome['home_expected_goals'] ?? 1.5,
+            'away_goals_prediction' => $matchOutcome['away_expected_goals'] ?? 1.2,
+            
+            // Calculate probabilities from confidence and outcome
+            'home_win_probability' => $this->calculateProbabilityFromOutcome($matchOutcome, 'home_win'),
+            'draw_probability' => $this->calculateProbabilityFromOutcome($matchOutcome, 'draw'),
+            'away_win_probability' => $this->calculateProbabilityFromOutcome($matchOutcome, 'away_win'),
+            'both_teams_score_probability' => $this->calculateBothTeamsScoreProbability($matchOutcome['home_expected_goals'] ?? 1.5, $matchOutcome['away_expected_goals'] ?? 1.2),
+            'over_2_5_probability' => $overUnder['confidence'] / 100.0 * ($overUnder['prediction'] === 'over' ? 1 : 0),
+            'under_2_5_probability' => $overUnder['confidence'] / 100.0 * ($overUnder['prediction'] === 'under' ? 1 : 0),
+            'first_half_over_0_5_probability' => $firstHalf['confidence'] / 100.0,
+            
+            // Predictions
+            'over_2_5_prediction' => $overUnder['prediction'] === 'over',
+            'over_2_5_confidence' => $overUnder['confidence'] / 100.0,
+            'over_0_5_first_half_prediction' => str_contains($firstHalf['prediction'], 'over'),
+            'first_half_confidence' => $firstHalf['confidence'] / 100.0,
+            'both_teams_score_prediction' => $this->calculateBothTeamsScoreProbability($matchOutcome['home_expected_goals'] ?? 1.5, $matchOutcome['away_expected_goals'] ?? 1.2) > 0.5,
+            'both_teams_score_confidence' => $this->calculateBothTeamsScoreProbability($matchOutcome['home_expected_goals'] ?? 1.5, $matchOutcome['away_expected_goals'] ?? 1.2),
+            
+            // Metadata
+            'prediction_type' => 'main_outcome',
+            'created_at' => now(),
+            'updated_at' => now()
+        ];
+    }
+    
+    /**
+     * Calculate probability from simple model outcome and confidence
+     */
+    private function calculateProbabilityFromOutcome(array $outcome, string $targetOutcome): float
+    {
+        $confidence = $outcome['confidence'] / 100.0;
+        $predictedOutcome = $outcome['predicted_outcome'];
+        
+        if ($predictedOutcome === $targetOutcome) {
+            // This is the predicted outcome, assign high probability based on confidence
+            return max(0.33, $confidence);
+        } else {
+            // This is not the predicted outcome, assign remaining probability
+            return (1.0 - $confidence) / 2.0; // Split remaining probability between other two outcomes
+        }
+    }
+    
+    /**
+     * Combine results from two models with weighting
+     */
+    private function combineModelResults(array $enhanced, array $simple, float $enhancedWeight, float $simpleWeight): array
+    {
+        $combined = $enhanced; // Start with enhanced as base
+        
+        // Combine probabilities with weighting
+        $combined['home_win_probability'] = ($enhanced['home_win_probability'] * $enhancedWeight) + 
+                                           ($simple['home_win_probability'] * $simpleWeight);
+        $combined['draw_probability'] = ($enhanced['draw_probability'] * $enhancedWeight) + 
+                                       ($simple['draw_probability'] * $simpleWeight);
+        $combined['away_win_probability'] = ($enhanced['away_win_probability'] * $enhancedWeight) + 
+                                           ($simple['away_win_probability'] * $simpleWeight);
+        
+        // Combine goal predictions
+        $combined['home_goals_prediction'] = ($enhanced['home_goals_prediction'] * $enhancedWeight) + 
+                                           ($simple['home_goals_prediction'] * $simpleWeight);
+        $combined['away_goals_prediction'] = ($enhanced['away_goals_prediction'] * $enhancedWeight) + 
+                                           ($simple['away_goals_prediction'] * $simpleWeight);
+        
+        // Combine other probabilities
+        $combined['over_2_5_probability'] = ($enhanced['over_2_5_probability'] * $enhancedWeight) + 
+                                           ($simple['over_2_5_probability'] * $simpleWeight);
+        $combined['both_teams_score_probability'] = ($enhanced['both_teams_score_probability'] * $enhancedWeight) + 
+                                                   ($simple['both_teams_score_probability'] * $simpleWeight);
+        
+        // Determine final outcome based on combined probabilities
+        $outcomes = [
+            'home_win' => $combined['home_win_probability'],
+            'draw' => $combined['draw_probability'], 
+            'away_win' => $combined['away_win_probability']
+        ];
+        
+        $combined['predicted_outcome'] = array_keys($outcomes, max($outcomes))[0];
+        $combined['confidence_score'] = max($outcomes);
+        $combined['model_version'] = 'ensemble_v1.0';
+        
+        // Update derived predictions
+        $combined['over_2_5_prediction'] = $combined['over_2_5_probability'] > 0.5;
+        $combined['both_teams_score_prediction'] = $combined['both_teams_score_probability'] > 0.5;
+        
+        return $combined;
+    }
+    
+    /**
+     * NEW: Simple Effective Predictor - Target >52% accuracy
+     * Replaces complex ML models with proven statistical approach
+     * @deprecated Use predictWithEnhancedModel instead
+     */
+    private function predictWithSimpleEffectiveModel(FootballMatch $match): ?array
+    {
+        try {
+            $basePath = base_path();
+            $pythonScript = $basePath . '/ml/enhanced_football_predictor.py';
+            
+            if (!file_exists($pythonScript)) {
+                Log::warning("Simple effective predictor script not found at: {$pythonScript}");
+                return null;
+            }
+            
+            // Use the enhanced predictor with predict command
+            $command = "/bin/bash -c 'cd {$basePath} && python3 {$pythonScript} predict {$match->home_team_id} {$match->away_team_id}'";
+            
+            $process = Process::fromShellCommandline($command);
+            $process->setTimeout(30);
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                Log::warning("Enhanced predictor failed for match {$match->id}. Error: " . $process->getErrorOutput());
+                return null;
+            }
+            
+            $output = $process->getOutput();
+            $result = json_decode($output, true);
+            
+            if (!$result || !isset($result['home_goals_prediction'])) {
+                Log::warning("Invalid response from enhanced predictor for match {$match->id}");
+                return null;
+            }
+            
+            // Map enhanced predictor response to database format
             return [
-                'predicted_outcome' => $outcomeData['predicted_outcome'],
-                'confidence_score' => $outcomeData['confidence'] / 100.0, // Convert percentage to decimal
-                'model_version' => $outcomeData['model_version'],
+                'predicted_outcome' => $result['predicted_outcome'],
+                'confidence_score' => $result['confidence_score'],
+                'model_version' => $result['model_version'],
                 
-                // Goals predictions
-                'predicted_home_goals' => $outcomeData['home_expected_goals'],
-                'predicted_away_goals' => $outcomeData['away_expected_goals'],
+                // Goals predictions - FIXED: Now using realistic values
+                'home_goals_prediction' => $result['home_goals_prediction'],
+                'away_goals_prediction' => $result['away_goals_prediction'],
+                
+                // Probabilities - Direct from enhanced model
+                'home_win_probability' => $result['home_win_probability'],
+                'draw_probability' => $result['draw_probability'],
+                'away_win_probability' => $result['away_win_probability'],
+                'both_teams_score_probability' => $result['both_teams_score_probability'],
+                'over_2_5_probability' => $result['over_2_5_probability'],
+                'under_2_5_probability' => $result['under_2_5_probability'],
+                'first_half_over_0_5_probability' => $result['first_half_over_0_5_probability'],
                 
                 // Over/Under predictions
-                'over_2_5_prediction' => $overUnder['prediction'] === 'over',
-                'over_2_5_confidence' => $overUnder['confidence'] / 100.0,
+                'over_2_5_prediction' => $result['over_2_5_probability'] > 0.5,
+                'over_2_5_confidence' => $result['over_2_5_probability'],
                 
                 // First half predictions  
-                'over_0_5_first_half_prediction' => $firstHalf['prediction'] === 'over_0_5_first_half',
-                'first_half_confidence' => $firstHalf['confidence'] / 100.0,
+                'over_0_5_first_half_prediction' => $result['first_half_over_0_5_probability'] > 0.5,
+                'first_half_confidence' => $result['first_half_over_0_5_probability'],
                 
-                // Both teams score (improved logic)
-                'both_teams_score_prediction' => $this->predictBothTeamsScore($outcomeData['home_expected_goals'], $outcomeData['away_expected_goals']),
-                'both_teams_score_confidence' => $this->getBothTeamsScoreConfidence($outcomeData['home_expected_goals'], $outcomeData['away_expected_goals']),
+                // Both teams score
+                'both_teams_score_prediction' => $result['both_teams_score_probability'] > 0.5,
+                'both_teams_score_confidence' => $result['both_teams_score_probability'],
                 
                 // Additional metadata
                 'prediction_type' => 'main_outcome',
@@ -556,5 +845,145 @@ class PredictionService
         }
         
         return max(0.50, min(0.90, $confidence));
+    }
+    
+    /**
+     * Calculate outcome probabilities from simple effective predictor data
+     */
+    private function calculateOutcomeProbabilities(array $outcomeData): array
+    {
+        $predictedOutcome = $outcomeData['predicted_outcome'];
+        $confidence = $outcomeData['confidence'] / 100.0;
+        $homeGoals = $outcomeData['home_expected_goals'];
+        $awayGoals = $outcomeData['away_expected_goals'];
+        
+        // Calculate probabilities based on expected goals using Poisson distribution logic
+        $goalDiff = $homeGoals - $awayGoals;
+        
+        // Base probabilities using logistic function
+        $homeWinProb = 1 / (1 + exp(-$goalDiff * 1.2));
+        $awayWinProb = 1 / (1 + exp($goalDiff * 1.2));
+        
+        // Draw probability increases for closer matches
+        $competitiveness = max(0, 1 - abs($goalDiff) * 0.8);
+        $drawProb = 0.25 + ($competitiveness * 0.15);
+        
+        // Ensure minimum probabilities
+        $homeWinProb = max(0.05, $homeWinProb);
+        $awayWinProb = max(0.05, $awayWinProb);
+        $drawProb = max(0.15, $drawProb);
+        
+        // Normalize probabilities
+        $total = $homeWinProb + $drawProb + $awayWinProb;
+        
+        return [
+            'home_win' => round($homeWinProb / $total, 4),
+            'draw' => round($drawProb / $total, 4),
+            'away_win' => round($awayWinProb / $total, 4)
+        ];
+    }
+    
+    /**
+     * Calculate both teams score probability based on expected goals
+     */
+    private function calculateBothTeamsScoreProbability(float $homeExpected, float $awayExpected): float
+    {
+        // Use Poisson distribution probability that both teams score at least 1 goal
+        // P(both score) = P(home >= 1) * P(away >= 1)
+        // P(team >= 1) = 1 - P(team = 0) = 1 - e^(-λ)
+        
+        $homeNoGoalProb = exp(-$homeExpected);
+        $awayNoGoalProb = exp(-$awayExpected);
+        
+        $homeScoreProb = 1 - $homeNoGoalProb;
+        $awayScoreProb = 1 - $awayNoGoalProb;
+        
+        $bothScoreProb = $homeScoreProb * $awayScoreProb;
+        
+        // Ensure realistic bounds
+        return max(0.15, min(0.90, $bothScoreProb));
+    }
+
+    /**
+     * Get team statistics with prioritized season fallback
+     */
+    private function getTeamStatistics($team)
+    {
+        // Priority: 2023 > 2024 > current year
+        $prioritySeasons = ['2023', '2024', date('Y')];
+        
+        foreach ($prioritySeasons as $season) {
+            $stats = $team->statistics()->where('season', $season)->first();
+            if ($stats) {
+                return $stats;
+            }
+        }
+        
+        return null; // No statistics found
+    }
+
+    /**
+     * Calculate match outcome probabilities based on team strengths
+     */
+    private function calculateMatchOutcomeProbabilities(float $homeStrength, float $awayStrength, float $homeAdvantage): array
+    {
+        // Apply home advantage
+        $adjustedHomeStrength = $homeStrength * (1 + $homeAdvantage);
+        
+        // Calculate raw probabilities based on strength difference
+        $strengthDiff = $adjustedHomeStrength - $awayStrength;
+        
+        // Use logistic function for probability calculation
+        $homeWinProb = PredictionConstants::FALLBACK_HOME_WIN_PROBABILITY + ($strengthDiff * 0.1);
+        $awayWinProb = PredictionConstants::FALLBACK_AWAY_WIN_PROBABILITY - ($strengthDiff * 0.08);
+        $drawProb = PredictionConstants::FALLBACK_DRAW_PROBABILITY - abs($strengthDiff) * 0.05;
+        
+        // Normalize probabilities to sum to 1
+        $total = $homeWinProb + $awayWinProb + $drawProb;
+        
+        return [
+            'home_win' => max(0.15, min(0.75, $homeWinProb / $total)),
+            'away_win' => max(0.15, min(0.75, $awayWinProb / $total)),
+            'draw' => max(0.10, min(0.50, $drawProb / $total))
+        ];
+    }
+
+    /**
+     * Determine predicted outcome based on probabilities
+     */
+    private function determinePredictedOutcome(array $probabilities): string
+    {
+        $maxProb = max($probabilities);
+        
+        foreach ($probabilities as $outcome => $probability) {
+            if ($probability === $maxProb) {
+                return $outcome;
+            }
+        }
+        
+        return 'draw'; // Fallback
+    }
+
+    /**
+     * Calculate confidence score based on prediction certainty
+     */
+    private function calculateConfidenceScore(array $probabilities, float $homeStrength, float $awayStrength): int
+    {
+        // Base confidence on probability margin
+        $maxProb = max($probabilities);
+        $secondMaxProb = max(array_diff($probabilities, [$maxProb]));
+        $margin = $maxProb - $secondMaxProb;
+        
+        // Base confidence from margin (0.1-0.6 margin -> 40-95 confidence)
+        $baseConfidence = 40 + ($margin * 100);
+        
+        // Adjust based on team strength difference (more confidence when teams clearly different)
+        $strengthDiff = abs($homeStrength - $awayStrength);
+        $strengthBonus = min(10, $strengthDiff * 5);
+        
+        $confidence = $baseConfidence + $strengthBonus;
+        
+        return (int) max(PredictionConstants::LOW_CONFIDENCE_THRESHOLD, 
+                        min(PredictionConstants::MAX_CONFIDENCE_SCORE, $confidence));
     }
 }

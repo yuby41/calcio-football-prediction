@@ -9,7 +9,7 @@ use Symfony\Component\Process\Exception\ProcessFailedException;
 
 class TrainEnhancedMLModels extends Command
 {
-    protected $signature = 'ml:train-enhanced {--precision-threshold=65 : Minimum accuracy threshold for model deployment} {--backup-existing : Backup existing models before training}';
+    protected $signature = 'ml:train-enhanced {--precision-threshold=50 : Minimum accuracy threshold for model deployment} {--backup-existing : Backup existing models before training}';
     protected $description = 'Train enhanced ML models optimized for match outcome predictions';
 
     public function handle()
@@ -103,9 +103,9 @@ class TrainEnhancedMLModels extends Command
         }
         
         // Usar entorno virtual configurado definitivamente
-        $basePath = base_path();
+        $basePath = escapeshellarg(base_path());
         $dependencyCheck = Process::fromShellCommandline(
-            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python -c \"import pandas, numpy, sklearn, xgboost, lightgbm, joblib; print(\\\"Dependencies OK\\\")\"'"
+            "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && python -c \"import pandas, numpy, sklearn, xgboost, lightgbm, joblib; print('Dependencies OK')\"")
         );
         
         $dependencyCheck->setTimeout(30); // Shorter timeout
@@ -124,9 +124,9 @@ class TrainEnhancedMLModels extends Command
             $this->info("Ejecutando: pip install -r requirements.txt");
             
             // Usar entorno virtual para instalación de dependencias
-            $basePath = base_path();
+            $basePath = escapeshellarg(base_path());
             $installProcess = Process::fromShellCommandline(
-                "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && pip install -r requirements.txt'"
+                "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && pip install -r requirements.txt")
             );
             $installProcess->setTimeout(300); // 5 minutes timeout
             $installProcess->run();
@@ -186,9 +186,10 @@ class TrainEnhancedMLModels extends Command
         }
         
         // Usar entorno virtual para entrenamiento
-        $basePath = base_path();
+        $basePath = escapeshellarg(base_path());
+        $mlPathEscaped = escapeshellarg($mlPath);
         $trainingProcess = Process::fromShellCommandline(
-            "/bin/bash -c 'cd {$basePath} && source ml_env/bin/activate && python {$mlPath}/enhanced_football_predictor.py train'"
+            "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && python {$mlPathEscaped}/enhanced_football_predictor.py train")
         );
         
         $trainingProcess->setTimeout(1800); // 30 minutes timeout

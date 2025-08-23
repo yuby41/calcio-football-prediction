@@ -25,11 +25,18 @@ class BettingStrategyService
         
         // CRITICAL FIX: Stop betting if budget is below minimum threshold
         $minimumBudget = max(2.0, $config->initial_budget * 0.01); // At least €2 or 1% of initial
+        
+        // For Martingale strategy, use a more lenient threshold since it's designed to recover from losses
+        if ($config->strategy === 'martingale') {
+            $minimumBudget = max(1.0, $config->initial_budget * 0.005); // 0.5% threshold for Martingale
+        }
+        
         if ($currentBudget < $minimumBudget) {
             \Log::info("Budget exhausted - stopping betting", [
                 'budget_id' => $config->id,
                 'current_budget' => $currentBudget,
-                'minimum_threshold' => $minimumBudget
+                'minimum_threshold' => $minimumBudget,
+                'strategy' => $config->strategy
             ]);
             return 0; // No betting when budget is too low
         }
@@ -116,7 +123,16 @@ class BettingStrategyService
             $amount = $baseAmount;
         }
 
-        return max(2, floor(min($amount, $maxBetAmount)));
+        // For Martingale, ensure we can still bet even with low budget by using minimum of €1
+        $finalAmount = max(1, floor(min($amount, $maxBetAmount)));
+        
+        // Special case: if the calculated amount would be less than €1, 
+        // allow €1 bet as long as current budget allows it
+        if ($finalAmount < 1 && $config->current_budget >= 1) {
+            $finalAmount = 1;
+        }
+
+        return $finalAmount;
     }
 
     private function calculateFixed(BudgetConfiguration $config, float $maxBetAmount): float
@@ -150,36 +166,7 @@ class BettingStrategyService
         return 0.5 + (($confidence - 60) / 30) * 1.5;
     }
 
-    /**
-     * DEPRECATED: Este método genera odds irreales
-     * @deprecated Use FootballApiOddsService::getRealOddsForMatch() instead
-     * @param string $betType
-     * @param FootballMatch $match
-     * @return float
-     */
-    public function getRecommendedOdds(string $betType, FootballMatch $match): float
-    {
-        \Log::warning('DEPRECATED: BettingStrategyService::getRecommendedOdds() called', [
-            'bet_type' => $betType,
-            'match_id' => $match->id,
-            'caller' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? 'unknown'
-        ]);
-        
-        // CRITICAL FIX: Return reasonable fallback odds without database predictions
-        // This prevents system failures when predictions are missing
-        
-        $fallbackOdds = [
-            'home_win' => 2.50,
-            'away_win' => 3.20,
-            'draw' => 3.00,
-            'over_2_5' => 1.85,
-            'under_2_5' => 1.95,
-            'both_teams_score' => 1.70,
-            'over_0_5_first_half' => 1.30,
-        ];
-        
-        return $fallbackOdds[$betType] ?? 2.0;
-    }
+    // Deprecated method removed - use FootballApiOddsService::getRealOddsForMatch() instead
 
     private function probabilityToOdds(float $probability): float
     {
@@ -208,9 +195,9 @@ class BettingStrategyService
             'placed_at' => now(),
         ]);
 
-        // Actualizar budget
-        $newBudget = $config->current_budget - $amount;
-        $config->update(['current_budget' => $newBudget]);
+        // Actualizar budget using new method
+        $config->placeBet($amount);
+        $newBudget = $config->current_budget;
 
         // Registrar en historial
         BudgetHistory::create([
@@ -291,19 +278,10 @@ class BettingStrategyService
             $config = $bet->budgetConfiguration;
             $oldBudget = $config->current_budget;
             
-            // CORRECTED: Handle bet resolution correctly
-            // When bet is placed: amount is deducted from budget
-            // When bet wins: return original amount + profit to budget  
-            // When bet loses: no additional change (amount stays deducted)
-            if ($result['status'] === 'won') {
-                // Return original bet amount + profit to budget
-                $newBudget = $oldBudget + $bet->amount + $result['profit'];
-            } else {
-                // For lost bets, no change needed - amount was already deducted when placed
-                $newBudget = $oldBudget;
-            }
+            // Use the new budget method to properly handle bet resolution
+            $config->resolveBet($bet->amount, $result['profit']);
+            $newBudget = $config->current_budget;
             
-            $config->update(['current_budget' => $newBudget]);
             $bet->update(['budget_after' => $newBudget]);
 
             // Registrar en historial

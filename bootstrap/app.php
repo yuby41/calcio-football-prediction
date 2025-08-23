@@ -11,7 +11,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $middleware->alias([
+            'api.rate.limit' => \App\Http\Middleware\ApiRateLimitMiddleware::class,
+        ]);
     })
     ->withSchedule(function ($schedule) {
         // Import scheduling from Console\Kernel.php

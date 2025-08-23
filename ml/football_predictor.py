@@ -38,7 +38,7 @@ class FootballPredictor:
         self.goals_model = None
         self.outcome_model = None
         self.feature_columns = []
-        self.model_version = "2.0.0-ensemble"
+        self.model_version = "2.1.0-ensemble-calibrated"
         
     def connect_db(self):
         """Create database connection"""
@@ -705,10 +705,19 @@ class FootballPredictor:
             away_nn_pred = self.goals_model['away']['nn'].predict(features_scaled)[0]
             away_weights = self.goals_model['away']['weights']
             away_goals_pred = max(0, away_weights[0] * away_xgb_pred + away_weights[1] * away_nn_pred)
+            
+            # Apply calibration to ensemble predictions as well
+            home_goals_pred = max(0.1, min(4.0, home_goals_pred * 0.6 + 0.8))
+            away_goals_pred = max(0.1, min(4.0, away_goals_pred * 0.6 + 0.8))
         else:
             # Legacy format compatibility
             home_goals_pred = max(0, self.goals_model['home'].predict(features_scaled)[0])
             away_goals_pred = max(0, self.goals_model['away'].predict(features_scaled)[0])
+        
+        # CALIBRATION: Apply realistic bounds to goal predictions
+        # Most football matches have 0-4 goals per team, with average around 1.5
+        home_goals_pred = max(0.1, min(4.0, home_goals_pred * 0.6 + 0.8))  # Scale down and add baseline
+        away_goals_pred = max(0.1, min(4.0, away_goals_pred * 0.6 + 0.8))  # Scale down and add baseline
         
         # Outcome prediction (support both ensemble and legacy formats)
         if isinstance(self.outcome_model, dict) and 'xgb' in self.outcome_model:

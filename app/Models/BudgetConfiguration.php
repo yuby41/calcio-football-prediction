@@ -92,7 +92,16 @@ class BudgetConfiguration extends Model
      */
     public function canBet(float $minimumAmount = null): bool
     {
-        $minimumThreshold = $minimumAmount ?? max(2.0, $this->initial_budget * 0.01);
+        if ($minimumAmount === null) {
+            $minimumThreshold = max(2.0, $this->initial_budget * 0.01);
+            
+            // For Martingale strategy, use a more lenient threshold
+            if ($this->strategy === 'martingale') {
+                $minimumThreshold = max(1.0, $this->initial_budget * 0.005);
+            }
+        } else {
+            $minimumThreshold = $minimumAmount;
+        }
         
         return $this->is_active && 
                $this->current_budget >= $minimumThreshold &&
@@ -133,6 +142,92 @@ class BudgetConfiguration extends Model
      */
     public function isExhausted(): bool
     {
-        return $this->current_budget < $this->getMinimumBetAmount();
+        $minimumThreshold = $this->getMinimumBetAmount();
+        
+        // For Martingale strategy, use a more lenient threshold
+        // since it's designed to recover from losses by doubling bets
+        if ($this->strategy === 'martingale') {
+            $minimumThreshold = max(1.0, $this->initial_budget * 0.005); // 0.5% threshold instead of 1%
+        }
+        
+        return $this->current_budget < $minimumThreshold;
+    }
+
+    /**
+     * Get the total balance after all resolved bets (won/lost)
+     */
+    public function getBalanceAfterResolvedBets(): float
+    {
+        $resolvedBets = $this->bets()->whereIn('status', ['won', 'lost'])->get();
+        $balance = $this->initial_budget;
+        
+        foreach ($resolvedBets as $bet) {
+            $balance += $bet->actual_profit ?? 0;
+        }
+        
+        return $balance;
+    }
+
+    /**
+     * Get total amount committed to pending bets
+     */
+    public function getPendingBetsAmount(): float
+    {
+        return (float) $this->bets()->where('status', 'pending')->sum('amount');
+    }
+
+    /**
+     * Get the correct available balance (after resolved bets minus pending commitments)
+     */
+    public function getAvailableBalance(): float
+    {
+        return $this->getBalanceAfterResolvedBets() - $this->getPendingBetsAmount();
+    }
+
+    /**
+     * Synchronize current_budget with correct available balance
+     */
+    public function syncAvailableBalance(): bool
+    {
+        $correctBalance = $this->getAvailableBalance();
+        
+        if (abs($this->current_budget - $correctBalance) > 0.01) {
+            $this->current_budget = $correctBalance;
+            $this->save();
+            return true; // Budget was corrected
+        }
+        
+        return false; // No correction needed
+    }
+
+    /**
+     * Update budget when a bet is placed (reduce available balance)
+     */
+    public function placeBet(float $amount): void
+    {
+        $this->current_budget -= $amount;
+        $this->save();
+    }
+
+    /**
+     * Update budget when a bet is resolved (add only profit, amount was already deducted)
+     */
+    public function resolveBet(float $amount, float $actualProfit): void
+    {
+        // When a bet resolves, we only add the profit/loss
+        // The original amount was already deducted when the bet was placed
+        // For lost bets: actualProfit = -amount (so we lose the amount)
+        // For won bets: actualProfit = positive (so we gain profit)
+        $this->current_budget += $actualProfit;
+        $this->save();
+    }
+
+    /**
+     * Update budget when a pending bet is cancelled (restore amount)
+     */
+    public function cancelBet(float $amount): void
+    {
+        $this->current_budget += $amount;
+        $this->save();
     }
 }

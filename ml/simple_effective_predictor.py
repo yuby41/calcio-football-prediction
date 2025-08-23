@@ -163,9 +163,18 @@ class SimpleEffectivePredictor:
         away_attack = (away_overall['goals_for_avg'] * 0.6 + away_away['goals_for_avg'] * 0.4)
         away_defense = (away_overall['goals_against_avg'] * 0.6 + away_away['goals_against_avg'] * 0.4)
         
-        # Expected goals calculation (Poisson-based)
-        home_expected_goals = (home_attack + away_defense) / 2 + 0.35  # Home advantage
-        away_expected_goals = (away_attack + home_defense) / 2
+        # PROFESSIONAL: Conservative and realistic goal calculation
+        # Base on actual football statistics: most teams score 0.8-2.2 goals per match
+        league_average = 1.3  # Slightly reduced for realism
+        
+        # Much more conservative ratios - professional football is not extreme
+        home_attack_ratio = max(0.7, min(1.4, home_attack / league_average))  # Tighter range
+        away_defense_ratio = max(0.8, min(1.3, league_average / away_defense))  # More conservative
+        home_expected_goals = max(0.5, min(2.5, home_attack_ratio * away_defense_ratio * league_average * 0.6 + 0.2))  # Reduced multiplier
+        
+        away_attack_ratio = max(0.7, min(1.4, away_attack / league_average))
+        home_defense_ratio = max(0.8, min(1.3, league_average / home_defense))
+        away_expected_goals = max(0.4, min(2.2, away_attack_ratio * home_defense_ratio * league_average * 0.55))  # Away handicap
         
         # Head-to-head adjustment (if sufficient data)
         if h2h['matches'] >= 3:
@@ -269,9 +278,17 @@ class SimpleEffectivePredictor:
         home_defense_weakness = home_stats['goals_against_avg']
         away_defense_weakness = away_stats['goals_against_avg']
         
-        # Expected goals using attack vs defense matchup
-        home_expected = (home_attack_strength + away_defense_weakness) / 2 + 0.3  # Home advantage
-        away_expected = (away_attack_strength + home_defense_weakness) / 2
+        # PROFESSIONAL: Conservative over/under calculation
+        league_average = 1.3  # Realistic average
+        
+        # Conservative ratios for professional predictions
+        home_attack_ratio = max(0.7, min(1.4, home_attack_strength / league_average))
+        away_defense_ratio = max(0.8, min(1.3, league_average / away_defense_weakness))
+        home_expected = max(0.5, min(2.5, home_attack_ratio * away_defense_ratio * league_average * 0.6 + 0.2))
+        
+        away_attack_ratio = max(0.7, min(1.4, away_attack_strength / league_average))
+        home_defense_ratio = max(0.8, min(1.3, league_average / home_defense_weakness))
+        away_expected = max(0.4, min(2.2, away_attack_ratio * home_defense_ratio * league_average * 0.55))
         
         total_expected = home_expected + away_expected
         
@@ -307,13 +324,22 @@ class SimpleEffectivePredictor:
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python simple_effective_predictor.py <home_team_id> <away_team_id>")
+    if len(sys.argv) < 2:
+        print("Usage: python simple_effective_predictor.py [predict] <home_team_id> <away_team_id>")
+        sys.exit(1)
+    
+    # Handle 'predict' command
+    start_idx = 1
+    if sys.argv[1] == 'predict':
+        start_idx = 2
+    
+    if len(sys.argv) < start_idx + 2:
+        print("Usage: python simple_effective_predictor.py [predict] <home_team_id> <away_team_id>")
         sys.exit(1)
     
     predictor = SimpleEffectivePredictor()
-    home_id = int(sys.argv[1])
-    away_id = int(sys.argv[2])
+    home_id = int(sys.argv[start_idx])
+    away_id = int(sys.argv[start_idx + 1])
     
     try:
         # Main outcome prediction
@@ -321,22 +347,45 @@ def main():
         over_under = predictor.predict_over_under(home_id, away_id)
         first_half = predictor.predict_first_half_goals(home_id, away_id)
         
+        # Format output compatible with enhanced model and PredictionService
         result = {
-            'success': True,
-            'predictions': {
-                'match_outcome': outcome,
-                'over_under_2_5': over_under,
-                'first_half_over_0_5': first_half
-            },
-            'model_info': {
-                'name': 'Simple Effective Predictor',
-                'version': 'v1.2',
-                'target_accuracy': '>52%',
-                'method': 'statistical_poisson_enhanced_draw'
+            'home_goals_prediction': outcome['home_expected_goals'],
+            'away_goals_prediction': outcome['away_expected_goals'],
+            'predicted_outcome': outcome['predicted_outcome'],
+            'confidence_score': outcome['confidence'] / 100.0,
+            'model_version': 'simple_effective_v1.2',
+            
+            # Probabilities (will be calculated by PredictionService)
+            'home_win_probability': 0.33,  # Placeholder
+            'draw_probability': 0.33,      # Placeholder  
+            'away_win_probability': 0.33,  # Placeholder
+            'both_teams_score_probability': 0.55,  # Placeholder
+            'over_2_5_probability': 1 - (over_under['confidence'] / 100.0) if over_under['prediction'] == 'under' else (over_under['confidence'] / 100.0),
+            'under_2_5_probability': (over_under['confidence'] / 100.0) if over_under['prediction'] == 'under' else 1 - (over_under['confidence'] / 100.0),
+            'first_half_over_0_5_probability': first_half['confidence'] / 100.0,
+            
+            # Expected goals for first half
+            'home_goals_first_half_prediction': first_half['expected_first_half_goals'] * 0.48,
+            'away_goals_first_half_prediction': first_half['expected_first_half_goals'] * 0.52,
+            
+            # Legacy format for backward compatibility
+            'legacy_format': {
+                'success': True,
+                'predictions': {
+                    'match_outcome': outcome,
+                    'over_under_2_5': over_under,
+                    'first_half_over_0_5': first_half
+                },
+                'model_info': {
+                    'name': 'Simple Effective Predictor',
+                    'version': 'v1.2',
+                    'target_accuracy': '>52%',
+                    'method': 'statistical_poisson_enhanced_draw'
+                }
             }
         }
         
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result))
         
     except Exception as e:
         print(json.dumps({

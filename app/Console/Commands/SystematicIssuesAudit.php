@@ -411,7 +411,7 @@ class SystematicIssuesAudit extends Command
                     break;
                     
                 case 'invalid_budgets':
-                    $this->call('budget:recalculate', ['--all' => true, '--force' => true]);
+                    $this->call('budgets:fix-calculations', ['--all' => true]);
                     $fixed++;
                     break;
                     
