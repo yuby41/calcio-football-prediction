@@ -377,24 +377,44 @@ class BudgetController extends Controller
         $cacheKey = "budget_opportunities_{$budget->id}_" . now()->format('Y-m-d-H');
         
         return \Cache::remember($cacheKey, 900, function() use ($budget) { // 15 minutos de cache
-            // Obtener partidos en vivo y programados por separado para asegurar cobertura
-            $liveMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+            // Obtener partidos en vivo y programados priorizando equipos con datos reales
+            $liveMatches = FootballMatch::with(['homeTeam.statistics', 'awayTeam.statistics', 'prediction'])
                 ->where('status', 'live')
                 ->where('match_date', '>=', now()->subDay())
                 ->where('match_date', '<=', now()->addHours(3))
                 ->whereHas('prediction')
+                ->whereHas('homeTeam.statistics')
+                ->whereHas('awayTeam.statistics')
                 ->orderBy('match_date')
-                ->limit(50)
+                ->limit(30)
                 ->get();
                 
-            $scheduledMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+            $scheduledMatches = FootballMatch::with(['homeTeam.statistics', 'awayTeam.statistics', 'prediction'])
                 ->where('status', 'scheduled')
                 ->where('match_date', '>=', now())
                 ->where('match_date', '<=', now()->addDays(7))
                 ->whereHas('prediction')
+                ->whereHas('homeTeam.statistics')
+                ->whereHas('awayTeam.statistics')
                 ->orderBy('match_date')
-                ->limit(50)
+                ->limit(30)
                 ->get();
+                
+            // Fallback: si no hay suficientes matches con datos reales, incluir algunos sintéticos
+            if ($liveMatches->count() + $scheduledMatches->count() < 20) {
+                $fallbackMatches = FootballMatch::with(['homeTeam', 'awayTeam', 'prediction'])
+                    ->where('status', 'scheduled')
+                    ->where('match_date', '>=', now())
+                    ->where('match_date', '<=', now()->addDays(3))
+                    ->whereHas('prediction')
+                    ->whereDoesntHave('homeTeam.statistics')
+                    ->orWhereDoesntHave('awayTeam.statistics')
+                    ->orderBy('match_date')
+                    ->limit(10)
+                    ->get();
+                    
+                $scheduledMatches = $scheduledMatches->concat($fallbackMatches);
+            }
                 
             // Combinar ambas colecciones
             $upcomingMatches = $liveMatches->concat($scheduledMatches);
@@ -503,12 +523,14 @@ class BudgetController extends Controller
                         'home_team' => [
                             'id' => $match->homeTeam->id,
                             'name' => $match->homeTeam->name,
-                            'short_name' => $this->getShortName($match->homeTeam->name)
+                            'short_name' => $this->getShortName($match->homeTeam->name),
+                            'has_real_data' => $match->homeTeam->statistics()->exists()
                         ],
                         'away_team' => [
                             'id' => $match->awayTeam->id,
                             'name' => $match->awayTeam->name,
-                            'short_name' => $this->getShortName($match->awayTeam->name)
+                            'short_name' => $this->getShortName($match->awayTeam->name),
+                            'has_real_data' => $match->awayTeam->statistics()->exists()
                         ],
                         'bet_type' => $betType,
                         'bet_type_display' => (new Bet(['bet_type' => $betType]))->getBetTypeDisplayAttribute(),
@@ -1319,6 +1341,10 @@ class BudgetController extends Controller
             'La Liga' => 'España',
             'Segunda Division' => 'España',
             'Segunda División' => 'España',
+            'Primera Federación' => 'España',
+            'Segunda Federación' => 'España',
+            'Tercera Federación' => 'España',
+            'Copa del Rey' => 'España',
             
             // Inglaterra  
             'Premier League' => 'Inglaterra',
@@ -1327,6 +1353,11 @@ class BudgetController extends Controller
             'League Two' => 'Inglaterra',
             'Non League Premier' => 'Inglaterra',
             'National League' => 'Inglaterra',
+            'National League North' => 'Inglaterra',
+            'National League South' => 'Inglaterra',
+            'Northern Premier League' => 'Inglaterra',
+            'Southern League Premier Division' => 'Inglaterra',
+            'Isthmian League Premier Division' => 'Inglaterra',
             
             // Italia
             'Serie A' => 'Italia',
@@ -1503,10 +1534,26 @@ class BudgetController extends Controller
             '2. SNL' => 'Eslovenia',
             'Virsliga' => 'Letonia',
             'National Division' => 'Luxemburgo',
-            'Premiership' => 'Escocia',
-            'Championship' => 'Escocia',
+            'Scottish Premiership' => 'Escocia',
+            'Scottish Championship' => 'Escocia',
+            'Scottish League One' => 'Escocia',
+            'Scottish League Two' => 'Escocia',
             'Premier Division' => 'Irlanda',
             'First Division' => 'Irlanda',
+            
+            // Países que faltaban
+            'Cymru Premier' => 'Gales',
+            'Welsh Premier League' => 'Gales',
+            'Cymru South' => 'Gales',
+            'Cymru North' => 'Gales',
+            'NIFL Premiership' => 'Irlanda del Norte',
+            'Championship (IRL)' => 'Irlanda del Norte',
+            'Superliga e Kosovës' => 'Kosovo',
+            'Liga e Parë' => 'Kosovo',
+            'Kategoria Superiore' => 'Albania',
+            'Kategoria e Parë' => 'Albania',
+            'BGL Ligue' => 'Luxemburgo',
+            'División de Honor' => 'Luxemburgo',
             
             // Asia
             'J1 League' => 'Japón',
@@ -1518,6 +1565,37 @@ class BudgetController extends Controller
             'K League 1' => 'Corea del Sur',
             'K League 2' => 'Corea del Sur',
             'K3 League' => 'Corea del Sur',
+            
+            // Ligas que estaban sin mapeo
+            '1st Division' => 'Sudáfrica',
+            '1st League - FBiH' => 'Bosnia y Herzegovina',
+            '1st League - RS' => 'Bosnia y Herzegovina', 
+            '2. Deild' => 'Islandia',
+            '2. Lig' => 'Turquía',
+            '3. Liga' => 'Eslovaquia',
+            '3. liga - CFL A' => 'República Checa',
+            '3. liga - CFL B' => 'República Checa', 
+            '3. liga - Center' => 'República Checa',
+            '3. liga - East' => 'República Checa',
+            '3. liga - MSFL' => 'República Checa',
+            '3. liga - West' => 'República Checa',
+            '4. liga - Divizie A' => 'República Checa',
+            '4. liga - Divizie B' => 'República Checa',
+            '4. liga - Divizie C' => 'República Checa',
+            '4. liga - Divizie D' => 'República Checa',
+            '4. liga - Divizie E' => 'República Checa',
+            '4. liga - Divizie F' => 'República Checa',
+            'Alagoano - 2' => 'Brasil',
+            'Alagoano U20' => 'Brasil',
+            'All-Island Cup - Women' => 'Irlanda',
+            'Bermuda Premier Division' => 'Bermudas',
+            'Botola Pro' => 'Marruecos',
+            'CAF Champions League' => 'África',
+            'CONMEBOL Libertadores' => 'Sudamérica',
+            'CONMEBOL Sudamericana' => 'Sudamérica',
+            'UEFA Champions League' => 'Europa',
+            'UEFA Europa League' => 'Europa',
+            'UEFA Conference League' => 'Europa',
             
             // Otros
             'Liga Nacional' => 'Honduras',
@@ -1550,21 +1628,37 @@ class BudgetController extends Controller
             }
         }
         
-        // Buscar patrones específicos para casos especiales
+        // Buscar patrones específicos para casos especiales (orden importa)
         $specialPatterns = [
-            '/^3\.\s*Division/i' => 'Italia',
+            // Patrones específicos primero para evitar conflictos
+            '/Welsh.*Premier/i' => 'Gales',
+            '/Scottish.*Premier/i' => 'Escocia',
+            '/Scottish.*Championship/i' => 'Escocia',
+            '/Northern.*Irish/i' => 'Irlanda del Norte',
+            '/NIFL/i' => 'Irlanda del Norte',
+            '/Liga.*MX/i' => 'México',
+            '/Primeira.*Liga/i' => 'Portugal',
+            '/La.*Liga/i' => 'España',
+            
+            // Patrones por división/sistema numérico
+            '/^3\.\s*Division.*Girone/i' => 'Italia',
             '/^4\.\s*Division/i' => 'Italia', 
+            '/^3\.\s*Division/i' => 'Italia',
             '/^2\.\s*Division/i' => 'Inglaterra',
             '/^1\.\s*Division/i' => 'Dinamarca',
             '/Liga\s*[0-9]/i' => 'Austria',
+            
+            // Patrones generales
             '/Bundesliga/i' => 'Alemania',
-            '/Premier\s*League/i' => 'Inglaterra',
             '/Serie\s*[A-D]/i' => 'Italia',
             '/Ligue\s*[12]/i' => 'Francia',
-            '/Liga\s*MX/i' => 'México',
             '/Eredivisie/i' => 'Holanda',
-            '/Primeira\s*Liga/i' => 'Portugal',
-            '/La\s*Liga/i' => 'España'
+            '/Premier.*League/i' => 'Inglaterra',
+            
+            // Patrones regionales brasileños
+            '/Carioca|Paulista|Mineiro|Gaúcho|Baiano/i' => 'Brasil',
+            '/Campeonato.*Brasil/i' => 'Brasil',
+            '/Copa.*Brasil/i' => 'Brasil'
         ];
         
         foreach ($specialPatterns as $pattern => $country) {

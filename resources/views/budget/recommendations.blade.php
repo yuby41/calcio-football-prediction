@@ -250,7 +250,7 @@ function renderMatchWithRecommendations(matchData, index) {
                     <div class="flex items-center space-x-4">
                         <div class="text-center">
                             <div class="text-lg font-bold text-gray-900">${matchData.home_team.short_name}</div>
-                            <div class="text-sm text-gray-500">Local</div>
+                            <div class="text-sm text-gray-500">Local ${matchData.home_team.has_real_data ? '✅ DATOS REALES' : '🔄 DATOS SINTÉTICOS'}</div>
                         </div>
                         <div class="text-center px-4">
                             <div class="text-sm text-gray-500">vs</div>
@@ -259,7 +259,7 @@ function renderMatchWithRecommendations(matchData, index) {
                         </div>
                         <div class="text-center">
                             <div class="text-lg font-bold text-gray-900">${matchData.away_team.short_name}</div>
-                            <div class="text-sm text-gray-500">Visitante</div>
+                            <div class="text-sm text-gray-500">Visitante ${matchData.away_team.has_real_data ? '✅ DATOS REALES' : '🔄 DATOS SINTÉTICOS'}</div>
                         </div>
                     </div>
                     <div class="text-right">
@@ -285,6 +285,10 @@ function renderMatchWithRecommendations(matchData, index) {
                         <div class="text-sm text-gray-500">🥅 Goles esperados</div>
                         <div class="font-bold text-lg text-green-600">${matchData.prediction_details.total_goals_prediction.toFixed(1)}</div>
                         <div class="text-xs text-gray-400">(${matchData.prediction_details.home_goals_prediction} - ${matchData.prediction_details.away_goals_prediction})</div>
+                        ${matchData.prediction_details.model_version && matchData.prediction_details.model_version.includes('real_data') ? 
+                            '<div class="text-xs text-green-500 font-medium">✅ DATOS REALES</div>' : 
+                            '<div class="text-xs text-orange-500">🤖 Sintético</div>'
+                        }
                     </div>
                     ${matchData.prediction_details.both_teams_score_confident ? `
                     <div>

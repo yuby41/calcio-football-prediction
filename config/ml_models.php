@@ -35,7 +35,7 @@ return array (
       'prediction_time' => 'Medium (1 second)',
     ),
   ),
-  'paths' => 
+  'paths' =>
   array (
     'ml_directory' => '/home/yualbe/Homestead/code/Calcio/ml',
     'models_directory' => '/home/yualbe/Homestead/code/Calcio/ml/models',

@@ -1,9 +1,9 @@
 {
-    "deployed_at": "2025-08-22T17:20:33.622929Z",
+    "deployed_at": "2025-09-28T00:20:31.574349Z",
     "model_version": "3.0.0-enhanced-outcomes",
-    "accuracy": 66.5,
-    "improvement": 55.4,
-    "quality_rating": "Muy Buena",
-    "matches_trained": 13323,
+    "accuracy": 57.5,
+    "improvement": 34.3,
+    "quality_rating": "Buena",
+    "matches_trained": 32472,
     "features_used": 41
 }

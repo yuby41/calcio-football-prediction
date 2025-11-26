@@ -1,32 +1,35 @@
 #!/bin/bash
 
-echo "🔧 Fixing Laravel permissions and cache issues..."
+# Fix Laravel permissions for Apache/www-data
+echo "🔧 Fixing Laravel permissions for Apache/www-data..."
 
-# Fix ownership and permissions
-echo "📁 Setting correct permissions..."
-chmod -R 775 storage/
-chmod -R 775 bootstrap/cache/
+# Set proper ownership for critical directories
+echo "Setting ownership for storage and cache directories..."
 
-# Fix file permissions specifically
-find storage -type f -exec chmod 664 {} \;
-find storage -type d -exec chmod 775 {} \;
-find bootstrap/cache -type f -exec chmod 664 {} \;
-find bootstrap/cache -type d -exec chmod 775 {} \;
+# Method 1: Add www-data to yualbe group and set group permissions
+sudo usermod -a -G yualbe www-data
 
-# Clear all caches
-echo "🧹 Clearing caches..."
-php artisan cache:clear
-php artisan config:clear
-php artisan view:clear
-php artisan route:clear
+# Set group ownership to yualbe (so both yualbe and www-data can access)
+sudo chgrp -R yualbe /home/yualbe/Homestead/code/Calcio/storage/
+sudo chgrp -R yualbe /home/yualbe/Homestead/code/Calcio/bootstrap/cache/
 
-# Rebuild essential caches
-echo "🔄 Rebuilding caches..."
-php artisan config:cache
-php artisan route:cache
+# Set permissions so group can write
+chmod -R 775 /home/yualbe/Homestead/code/Calcio/storage/
+chmod -R 775 /home/yualbe/Homestead/code/Calcio/bootstrap/cache/
 
-# Test view compilation
-echo "🧪 Testing view compilation..."
-php artisan tinker --execute="echo 'Testing views...'; try { view('welcome'); echo 'Views working correctly'; } catch (Exception \$e) { echo 'Error: ' . \$e->getMessage(); }"
+# Set setgid bit so new files inherit group ownership
+find /home/yualbe/Homestead/code/Calcio/storage/ -type d -exec chmod g+s {} \;
+find /home/yualbe/Homestead/code/Calcio/bootstrap/cache/ -type d -exec chmod g+s {} \;
 
-echo "✅ Permission and cache fixes completed!"
+# Create a test file to verify permissions
+echo "Testing permissions..."
+sudo -u www-data touch /home/yualbe/Homestead/code/Calcio/storage/framework/views/test_file.php
+if [ -f "/home/yualbe/Homestead/code/Calcio/storage/framework/views/test_file.php" ]; then
+    echo "✅ Success: www-data can write to views directory"
+    rm /home/yualbe/Homestead/code/Calcio/storage/framework/views/test_file.php
+else
+    echo "❌ Failed: www-data cannot write to views directory"
+fi
+
+echo "✅ Permissions fixed!"
+echo "You may need to restart Apache: sudo systemctl restart apache2"
