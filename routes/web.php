@@ -50,3 +50,8 @@ Route::prefix('api')->group(function () {
     Route::get('/live/live-matches', [App\Http\Controllers\Api\LiveUpdatesController::class, 'liveMatches'])->name('api.live.live-matches');
     Route::get('/health', [App\Http\Controllers\Api\LiveUpdatesController::class, 'health'])->name('api.health');
 });
+
+
+Route::get('/test-views-fix', function () {
+    return view('welcome', ['test' => 'Views compilation working!']);
+})->name('test.views.fix');

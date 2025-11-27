@@ -41,7 +41,7 @@ class MigrateToIntelligentEngine extends Command
             $query->where('external_id', 'regexp', '^[0-9]+$');
         })
         ->with(['homeTeam', 'awayTeam', 'prediction'])
-        ->where('match_date', '>=', now()->subDays(14))
+        ->where('match_date', '>=', now()->subDays(180))
         ->limit($limit)
         ->get();
 
