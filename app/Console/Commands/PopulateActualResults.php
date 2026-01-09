@@ -4,19 +4,19 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\FootballMatch;
-use App\Services\FootballApiService;
+use App\Services\EnhancedFootballApiService;
 
 class PopulateActualResults extends Command
 {
-    protected $signature = 'results:populate 
+    protected $signature = 'results:populate
                             {--matches=10 : Number of matches to populate}
                             {--days=7 : Days back to look for finished matches}';
-    
+
     protected $description = 'Populate actual match results from API-Sports for performance analysis';
 
-    private FootballApiService $apiService;
+    private EnhancedFootballApiService $apiService;
 
-    public function __construct(FootballApiService $apiService)
+    public function __construct(EnhancedFootballApiService $apiService)
     {
         parent::__construct();
         $this->apiService = $apiService;

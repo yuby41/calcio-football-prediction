@@ -319,11 +319,33 @@ class EnhancedFootballApiService
     public function fetchTodayMatches(): array
     {
         $cacheKey = 'api_today_matches_' . date('Y-m-d');
-        
+
         return Cache::remember($cacheKey, now()->addMinutes(15), function () {
             $today = Carbon::today($this->timezone)->format('Y-m-d');
             return $this->fetchFixtures(null, null, $today);
         });
+    }
+
+    public function fetchFixture(int $fixtureId): ?array
+    {
+        try {
+            $response = Http::withHeaders($this->headers)
+                ->get("{$this->baseUrl}/fixtures", [
+                    'id' => $fixtureId,
+                    'timezone' => $this->timezone
+                ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return $data['response'][0] ?? null;
+            }
+
+            Log::error("Failed to fetch fixture {$fixtureId}");
+            return null;
+        } catch (\Exception $e) {
+            Log::error("Error fetching fixture {$fixtureId}: " . $e->getMessage());
+            return null;
+        }
     }
 
     public function fetchMatchesByDateRange(string $from, string $to, string $league = null): array
