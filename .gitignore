@@ -27,3 +27,8 @@ ml/models/*.pkl
 ml/venv/
 ml/__pycache__/
 ml_env/
+claude_env/
+/database/*.sqlite
+/database/*.sqlite-*
+.claude/settings.local.json
+/public/build/
