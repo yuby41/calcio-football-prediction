@@ -9,7 +9,7 @@ return array (
       'name' => 'Enhanced ML Ensemble',
       'script' => 'enhanced_football_predictor.py',
       'description' => 'XGBoost + LightGBM + Neural Network + Random Forest ensemble',
-      'accuracy' => '~58%',
+      'accuracy' => null,
       'features' => 35,
       'training_time' => 'High (5-10 minutes)',
       'prediction_time' => 'Medium (1-2 seconds)',
@@ -19,7 +19,7 @@ return array (
       'name' => 'Simple Statistical Predictor',
       'script' => 'simple_effective_predictor.py',
       'description' => 'Fast statistical model with Poisson distribution',
-      'accuracy' => '~52%',
+      'accuracy' => null,
       'features' => 12,
       'training_time' => 'None (statistical)',
       'prediction_time' => 'Fast (<0.5 seconds)',
@@ -29,7 +29,7 @@ return array (
       'name' => 'Hybrid Ensemble',
       'script' => 'hybrid_predictor.py',
       'description' => 'Combines enhanced ML with statistical methods',
-      'accuracy' => '~55%',
+      'accuracy' => null,
       'features' => 25,
       'training_time' => 'Medium (3-5 minutes)',
       'prediction_time' => 'Medium (1 second)',
@@ -37,9 +37,9 @@ return array (
   ),
   'paths' =>
   array (
-    'ml_directory' => '/home/yualbe/Homestead/code/Calcio/ml',
-    'models_directory' => '/home/yualbe/Homestead/code/Calcio/ml/models',
-    'python_env' => '/home/yualbe/Homestead/code/Calcio/ml_env/bin/python',
+      'ml_directory' => env('ML_DIRECTORY', base_path('ml')),
+      'models_directory' => env('ML_MODELS_DIRECTORY', base_path('ml/models')),
+      'python_env' => env('ML_PYTHON', base_path('ml_env/bin/python')),
   ),
   'settings' => 
   array (

@@ -17,14 +17,17 @@ class VerifyRealFirstHalfData extends Command
     
     protected $description = 'Verify and fetch real first-half data from Football API to replace synthetic data';
 
-    private string $apiKey;
+    private ?string $apiKey;
     private string $apiUrl;
 
     public function __construct()
     {
         parent::__construct();
-        $this->apiKey = config('services.football_api.key', '');
-        $this->apiUrl = 'https://v3.football.api-sports.io';
+        $this->apiKey = config('services.football_api.key');
+        $this->apiUrl = config(
+            'services.football_api.base_url',
+            'https://v3.football.api-sports.io'
+        );
     }
 
     public function handle()

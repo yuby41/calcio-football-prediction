@@ -32,7 +32,6 @@
     "home_defense_zscore",
     "away_defense_zscore",
     "season_stage_normalized",
-    "league_home_advantage",
     "home_form_trend",
     "away_form_trend",
     "form_momentum_gap",
@@ -43,6 +42,6 @@
     "away_consistency"
   ],
   "model_version": "3.0.0-enhanced-outcomes",
-  "trained_at": "2025-11-30T02:44:19.582868",
+  "trained_at": "2026-09-26T03:04:04.599295",
   "ensemble_type": "Enhanced XGBoost + LightGBM + Neural Network + Random Forest"
 }

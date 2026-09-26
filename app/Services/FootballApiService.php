@@ -12,7 +12,7 @@ use Carbon\Carbon;
 class FootballApiService
 {
     private string $baseUrl;
-    private string $apiKey;
+    private ?string $apiKey;
     private string $timezone;
     private array $headers;
 
@@ -32,7 +32,7 @@ class FootballApiService
         try {
             $leagueId = $this->getLeagueId($league);
             $season = date('Y');
-            
+
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/teams", [
                     'league' => $leagueId,
@@ -61,7 +61,7 @@ class FootballApiService
         try {
             $leagueId = $this->getLeagueId($league);
             $season = $season ?? date('Y');
-            
+
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/fixtures", [
                     'league' => $leagueId,
@@ -112,7 +112,7 @@ class FootballApiService
         try {
             // Usar la zona horaria configurada para obtener la fecha local correcta
             $today = Carbon::today($this->timezone)->format('Y-m-d');
-            
+
             $response = Http::withHeaders($this->headers)
                 ->get("{$this->baseUrl}/fixtures", [
                     'date' => $today,
@@ -133,6 +133,68 @@ class FootballApiService
         } catch (\Exception $e) {
             Log::error('Exception fetching today matches: ' . $e->getMessage());
             return [];
+        }
+    }
+
+        public function fetchMatchesByDateRange(
+        string $from,
+        string $to,
+        ?string $league = null
+    ): array {
+        try {
+            $params = [
+                'from' => $from,
+                'to' => $to,
+                'timezone' => $this->timezone,
+            ];
+
+            if ($league !== null) {
+                $params['league'] = $this->getLeagueId($league);
+            }
+
+            $response = Http::withHeaders($this->headers)
+                ->get("{$this->baseUrl}/fixtures", $params);
+
+            if ($response->successful()) {
+                $data = $response->json();
+
+                $errors = $data['errors'] ?? [];
+
+                if (!empty($errors)) {
+                    Log::error('API-Sports returned an application error', [
+                        'from' => $from,
+                        'to' => $to,
+                        'league' => $league,
+                        'errors' => $errors,
+                    ]);
+
+                    throw new \RuntimeException(
+                        'API-Sports error: ' .
+                        json_encode($errors, JSON_UNESCAPED_SLASHES)
+                    );
+                }
+
+                return $this->processMatchesData(
+                    $data['response'] ?? []
+                );
+            }
+
+            Log::error('Failed to fetch historical matches', [
+                'from' => $from,
+                'to' => $to,
+                'league' => $league,
+                'status' => $response->status(),
+                'response' => $response->body(),
+            ]);
+
+            return [];
+        } catch (\Throwable $e) {
+            Log::error(
+                'Exception fetching historical matches: ' .
+                $e->getMessage()
+            );
+
+            throw $e;
         }
     }
 
@@ -189,18 +251,18 @@ class FootballApiService
             $goals = $matchData['goals'] ?? [];
             $score = $matchData['score'] ?? [];
             $league = $matchData['league'] ?? [];
-            
+
             // La API v3.football.api-sports.io devuelve fechas en UTC, convertimos a zona horaria local
             $matchDate = Carbon::parse($fixture['date'])
                 ->utc() // Asegurar que se interprete como UTC
                 ->setTimezone($this->timezone); // Convertir a zona horaria local
-            
+
             // Si la hora es 00:00, verificar si tenemos mejor información de timestamp
             if ($matchDate->format('H:i') === '00:00' && isset($fixture['timestamp'])) {
                 $matchDate = Carbon::createFromTimestamp($fixture['timestamp'])
                     ->setTimezone($this->timezone);
             }
-            
+
             $processedMatches[] = [
                 'external_id' => (string) $fixture['id'],
                 'home_team_external_id' => (string) $teams['home']['id'],
@@ -253,7 +315,7 @@ class FootballApiService
             $fixture = $match['fixture'] ?? [];
             $teams = $match['teams'] ?? [];
             $goals = $match['goals'] ?? [];
-            
+
             if ($fixture['status']['short'] !== 'FT') continue;
 
             $isHome = $teams['home']['id'] == $teamId;
@@ -306,9 +368,9 @@ class FootballApiService
         }
 
         $stats['goals_difference'] = $stats['goals_for'] - $stats['goals_against'];
-        $stats['avg_goals_for'] = $stats['matches_played'] > 0 ? 
+        $stats['avg_goals_for'] = $stats['matches_played'] > 0 ?
             round($stats['goals_for'] / $stats['matches_played'], 2) : 0;
-        $stats['avg_goals_against'] = $stats['matches_played'] > 0 ? 
+        $stats['avg_goals_against'] = $stats['matches_played'] > 0 ?
             round($stats['goals_against'] / $stats['matches_played'], 2) : 0;
         $stats['form'] = array_slice($stats['form'], 0, 5);
 
@@ -383,7 +445,7 @@ class FootballApiService
 
         $matchData['home_team_id'] = $homeTeam->id;
         $matchData['away_team_id'] = $awayTeam->id;
-        unset($matchData['home_team_external_id'], $matchData['away_team_external_id'], 
+        unset($matchData['home_team_external_id'], $matchData['away_team_external_id'],
               $matchData['home_team_name'], $matchData['away_team_name']);
 
         FootballMatch::updateOrCreate(
@@ -409,12 +471,12 @@ class FootballApiService
     private function extractRoundNumber(?string $round): ?string
     {
         if (!$round) return null;
-        
+
         // Extract number from strings like "Regular Season - 1", "Matchday 1", etc.
         if (preg_match('/(\d+)/', $round, $matches)) {
             return $matches[1];
         }
-        
+
         return $round;
     }
 
@@ -422,11 +484,11 @@ class FootballApiService
     {
         // Remove accents and special characters
         $shortName = $this->removeAccents($teamName);
-        
+
         // Take first 3 characters of each word, max 3 characters total
         $words = explode(' ', $shortName);
         $result = '';
-        
+
         foreach ($words as $word) {
             if (strlen($result) >= 3) break;
             $cleanWord = preg_replace('/[^A-Za-z0-9]/', '', $word);
@@ -434,13 +496,13 @@ class FootballApiService
                 $result .= strtoupper(substr($cleanWord, 0, 1));
             }
         }
-        
+
         // If we don't have 3 characters, pad with the first word
         if (strlen($result) < 3 && !empty($words[0])) {
             $firstWord = preg_replace('/[^A-Za-z0-9]/', '', $words[0]);
             $result = strtoupper(substr($firstWord, 0, 3));
         }
-        
+
         return substr($result ?: 'TBD', 0, 3);
     }
 
@@ -463,7 +525,7 @@ class FootballApiService
             'ľ' => 'l', 'ł' => 'l',
             'ĺ' => 'l',
         ];
-        
+
         return strtr(mb_strtolower($string), $accents);
     }
 }

@@ -8,7 +8,7 @@ set -e
 echo "🚀 Configurando entorno ML definitivo para Calcio..."
 
 # Directorios
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ML_ENV_DIR="$PROJECT_DIR/ml_env"
 
 # Crear entorno virtual si no existe
@@ -23,11 +23,11 @@ source "$ML_ENV_DIR/bin/activate"
 
 # Actualizar pip
 echo "⬆️  Actualizando pip..."
-pip install --upgrade pip
+python -m pip install --upgrade pip
 
 # Instalar dependencias desde requirements.txt
 echo "📚 Instalando dependencias ML..."
-pip install -r requirements.txt
+python -m pip install -r "$PROJECT_DIR/ml/requirements.txt"
 
 # Verificar instalación
 echo "✅ Verificando dependencias..."
@@ -51,10 +51,12 @@ print(f'LightGBM: {lgb.__version__}')
 
 # Crear archivo de activación rápida
 echo "🔧 Creando script de activación rápida..."
-cat > "$PROJECT_DIR/activate_ml.sh" << EOF
+cat > "$PROJECT_DIR/activate_ml.sh" <<'EOF'
 #!/bin/bash
-# Script de activación rápida del entorno ML
-source "$ML_ENV_DIR/bin/activate"
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$PROJECT_DIR/ml_env/bin/activate"
+
 echo "✅ Entorno ML activado"
 echo "Para desactivar: deactivate"
 EOF

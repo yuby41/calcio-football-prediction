@@ -13,14 +13,17 @@ class VerifyMatchResults extends Command
     protected $signature = 'matches:verify-results {--match-id= : Specific match ID to verify} {--external-id= : Specific external ID to verify} {--fix : Fix incorrect results} {--limit=1000 : Limit the number of matches to verify}';
     protected $description = 'Verify match results against external API and fix discrepancies';
 
-    private string $apiKey;
+    private ?string $apiKey;
     private string $apiUrl;
 
     public function __construct()
     {
         parent::__construct();
         $this->apiKey = config('services.football_api.key', '');
-        $this->apiUrl = 'https://v3.football.api-sports.io';
+        $this->apiUrl = config(
+            'services.football_api.base_url',
+            'https://v3.football.api-sports.io'
+        );
     }
 
     public function handle()

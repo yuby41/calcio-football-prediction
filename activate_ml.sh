@@ -1,5 +1,7 @@
 #!/bin/bash
-# Script de activación rápida del entorno ML
-source "/home/yualbe/Homestead/code/Calcio/ml_env/bin/activate"
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$PROJECT_DIR/ml_env/bin/activate"
+
 echo "✅ Entorno ML activado"
 echo "Para desactivar: deactivate"

@@ -1,234 +1,423 @@
-# ⚽ Calcio - Football Prediction System
+# Calcio — Football Prediction & ML Pipeline
 
-A Laravel-based football betting application that uses Machine Learning to predict match outcomes and goal scores. The system fetches data from external football APIs, processes it with Python ML models, and displays predictions through a responsive web interface.
+A football data and machine-learning experimentation platform built with **Laravel 12, Python and MySQL**.
 
-## 🚀 Features
+The project combines historical football data ingestion, reproducible ML training, temporal feature engineering and Laravel application services in a single repository.
 
-- **ML-Powered Predictions**: XGBoost and Gradient Boosting models for accurate predictions
-- **Real-time Updates**: Live match scores with intelligent polling (10-30s intervals)
-- **Interactive Dashboard**: Modern UI with TailwindCSS and Chart.js
-- **Automated Statistics**: Real-time prediction accuracy tracking
-- **Multi-League Support**: Premier League, La Liga, Bundesliga, and more
-- **Performance Analytics**: Detailed accuracy metrics and trends
-- **Live Match Broadcasting**: Event-driven updates for live scores and statistics
-- **API Endpoints**: RESTful APIs for real-time data access
-- **Budget Management**: Advanced bankroll strategies including Mansaniello, Fibonacci, Martingale
-- **Risk Control**: Automatic bet sizing based on ML confidence and strategy parameters
+The current ML experiment focuses on **Serie A 1X2 outcome classification** (`home_win`, `draw`, `away_win`) using causal point-in-time features.
 
-## 🛠️ Tech Stack
+## Overview
 
-- **Backend**: Laravel 12, PHP 8.3
-- **Frontend**: Blade templates, TailwindCSS 4.0, Chart.js
-- **Database**: MySQL (SQLite for development)
-- **ML Engine**: Python 3.8+ with scikit-learn, XGBoost, pandas
-- **API**: Football-API.org integration
-- **Build Tools**: Vite, Composer
+The project is divided into two main layers:
 
-## 📋 Requirements
+### Laravel application
 
-- PHP 8.2+
-- Composer
-- Node.js & NPM
-- Python 3.8+
-- MySQL (or SQLite for development)
-- Football API key from [Football-API.org](https://www.football-data.org)
+Laravel handles:
 
-## ⚡ Quick Start
+* football data management;
+* database persistence;
+* historical data imports;
+* API integrations;
+* application services;
+* prediction orchestration;
+* CLI commands;
+* web application functionality.
 
-### 1. Clone & Install
-```bash
-git clone <repository-url>
-cd calcio
-composer install
-npm install
+### Python ML pipeline
+
+Python handles:
+
+* dataset preparation;
+* causal feature engineering;
+* chronological train/validation/test separation;
+* model training;
+* time-series cross-validation;
+* ensemble classification;
+* model evaluation and artifact generation.
+
+The enhanced ML pipeline uses:
+
+* XGBoost
+* LightGBM
+* scikit-learn MLP
+* Random Forest
+* pandas
+* NumPy
+* joblib
+
+## Architecture
+
+```text
+                    Historical data
+                       OpenFootball
+                            |
+                            v
+                 Laravel import service
+                            |
+                            v
+                         MySQL
+                            |
+                            v
+                  Python ML pipeline
+                            |
+             +--------------+--------------+
+             |              |              |
+       Point-in-time     Feature       Temporal
+        statistics     engineering      split
+             |              |              |
+             +--------------+--------------+
+                            |
+                            v
+             XGBoost / LightGBM / MLP / RF
+                            |
+                            v
+                    1X2 Ensemble Model
+                            |
+                            v
+                Evaluation / Model artifacts
+
+
+Operational / application layer:
+
+API-Sports ---> Laravel services ---> Database / application
 ```
 
-### 2. Environment Setup
+Historical model training is intentionally separated from the operational API integration.
+
+This allows the ML experiment to be reproduced without requiring an API key.
+
+## Historical Dataset
+
+The enhanced experiment uses historical **Serie A** data imported from OpenFootball.
+
+Current dataset:
+
+| Property                    |             Value |
+| --------------------------- | ----------------: |
+| Seasons                     |                 5 |
+| Period                      | 2020-21 → 2024-25 |
+| Finished matches            |             1,890 |
+| Teams                       |                28 |
+| Matches with half-time data |             1,770 |
+
+Matches without a final score are excluded from the training dataset.
+
+Historical records use deterministic identifiers during import so that the ingestion process can be rerun without creating duplicate fixtures.
+
+## Avoiding Temporal Data Leakage
+
+One of the main goals of the enhanced pipeline is preventing future information from leaking into historical training examples.
+
+For every match, team statistics are calculated using only matches that occurred **before that fixture**.
+
+Examples include:
+
+* previous matches played;
+* wins, draws and losses;
+* goals scored and conceded;
+* points per game;
+* goal difference;
+* attacking and defensive strength;
+* recent form indicators.
+
+Statistics are reset at the beginning of each season.
+
+The point-in-time implementation was checked against basic causal invariants, including verifying that a team's first appearance of each season contains zero prior matches.
+
+## Feature Engineering
+
+The final Enhanced v3 classifier uses **40 features**.
+
+Feature groups include:
+
+* win/draw/loss rates;
+* scoring and conceding rates;
+* goal difference;
+* points per game;
+* attack and defense strength;
+* home/away strength comparisons;
+* normalized attack and defense indicators;
+* season progression;
+* recent-form trends;
+* form momentum;
+* consistency indicators.
+
+Features are constructed chronologically before the temporal dataset split.
+
+## Temporal Evaluation Strategy
+
+Random train/test splitting is intentionally avoided.
+
+The dataset is divided chronologically:
+
+| Dataset       | Seasons           | Matches |
+| ------------- | ----------------- | ------: |
+| Training      | 2020-21 → 2022-23 |   1,140 |
+| Validation    | 2023-24           |     380 |
+| Final holdout | 2024-25           |     370 |
+
+The final 2024-25 season was excluded from model training and model selection and was evaluated once after the model pipeline was frozen.
+
+The training set also uses a five-fold `TimeSeriesSplit` for chronological cross-validation.
+
+## Ensemble
+
+Enhanced v3 combines four classifiers:
+
+* XGBoost
+* LightGBM
+* Multi-Layer Perceptron
+* Random Forest
+
+The frozen ensemble currently uses equal weights:
+
+```text
+XGBoost        25%
+LightGBM       25%
+MLP            25%
+Random Forest  25%
+```
+
+A majority-class classifier is used as the baseline.
+
+## Results
+
+### Validation — 2023-24
+
+| Metric            | Majority baseline |  Ensemble |
+| ----------------- | ----------------: | --------: |
+| Accuracy          |             41.8% | **47.1%** |
+| Balanced Accuracy |             33.3% | **45.9%** |
+| Macro F1          |             0.197 | **0.438** |
+| Log Loss          |                 — |     1.190 |
+
+Training-only time-series cross-validation accuracies:
+
+```text
+Fold 1: 49.5%
+Fold 2: 44.2%
+Fold 3: 43.7%
+Fold 4: 43.7%
+Fold 5: 42.6%
+```
+
+### Final Holdout — 2024-25
+
+| Metric            | Majority baseline | Frozen Ensemble |
+| ----------------- | ----------------: | --------------: |
+| Accuracy          |             40.3% |       **44.1%** |
+| Balanced Accuracy |             33.3% |       **43.1%** |
+| Macro F1          |             0.191 |       **0.408** |
+| Log Loss          |                 — |           1.176 |
+
+These metrics are reported as experimental results rather than production accuracy claims.
+
+The final holdout was not subsequently used to tune the model.
+
+## Historical Data Import
+
+Historical Serie A data can be imported with:
+
+```bash
+php artisan football:import-open-history \
+    --competition=serie-a \
+    --from=2020-21 \
+    --to=2024-25
+```
+
+The importer:
+
+1. downloads the requested OpenFootball datasets;
+2. validates the source records;
+3. creates deterministic team and match identifiers;
+4. stores completed fixtures;
+5. skips records without final scores;
+6. supports repeated execution without duplicating imported fixtures.
+
+A dry-run mode is also available.
+
+## Installation
+
+### Laravel
+
+Requirements:
+
+* PHP 8.2+
+* Composer
+* MySQL
+* PHP extensions required by Laravel and project dependencies
+
+Install PHP dependencies:
+
+```bash
+composer install
+```
+
+Create the environment file:
+
 ```bash
 cp .env.example .env
 php artisan key:generate
 ```
 
-Edit `.env` with your database and API credentials:
-```env
-DB_CONNECTION=mysql
-DB_DATABASE=calcio
-DB_USERNAME=your_username
-DB_PASSWORD=your_password
+Configure the database in `.env`, then run:
 
-FOOTBALL_API_KEY=your_api_key_here
-```
-
-### 3. Database & ML Setup
 ```bash
 php artisan migrate
-python3 -m pip install -r ml/requirements.txt
-php artisan ml:train
 ```
 
-### 4. Start Development
-```bash
-# Start all services
-composer dev
+### Python ML environment
 
-# Or individually:
-php artisan serve
-npm run dev
-```
+Python 3.12 was used for the current experiment.
 
-## 🔄 Data Management
-
-### Sync Football Data
-```bash
-# Sync specific league (PL, PD, BL1, etc.)
-php artisan football:sync PL --season=2024
-
-# Sync today's matches from all leagues
-php artisan football:sync-today
-
-# Update live scores and predictions
-php artisan football:update-today
-```
-
-### Machine Learning
-```bash
-# Train ML models
-php artisan ml:train
-
-# Generate predictions
-php artisan ml:predict
-
-# Update prediction accuracy
-php artisan statistics:update-sql
-```
-
-## 📊 Web Interface
-
-- **Home** (/) - Dashboard with live matches and predictions
-- **Matches** (/matches) - All matches with filtering and live updates
-- **Teams** (/teams) - Team statistics and profiles  
-- **Statistics** (/statistics) - Prediction accuracy analytics with real-time updates
-- **Budget** (/budget) - Advanced bankroll management with multiple strategies
-
-## 💰 Budget Management System
-
-### Estrategias Disponibles
-- **Mansaniello**: Progresión controlada con secuencia específica (1,1,2,2,3,4,5,7,9,12...)
-- **Fibonacci**: Secuencia matemática clásica (1,1,2,3,5,8,13,21...)
-- **Martingala Limitada**: Duplicación con límites de seguridad
-- **Apuesta Fija**: Cantidad constante por apuesta
-- **Porcentaje Kelly**: Ajuste automático según confianza de la IA
-
-### Gestión de Riesgo
-- Límite máximo por apuesta (% del bankroll)
-- Confianza mínima requerida de la IA
-- Control automático de secuencias
-- Historial completo de transacciones
-- Métricas de rendimiento (ROI, Win Rate, Drawdown)
-
-### Comandos de Budget
-```bash
-# Crear configuración de ejemplo
-php artisan budget:create-sample --amount=500
-
-# Ver todas las configuraciones
-curl http://localhost:8000/budget
-```
-
-## 🔗 API Endpoints
-
-### Live Data
-- `GET /api/live/matches` - Live match updates with timestamps
-- `GET /api/live/statistics` - Real-time prediction accuracy
-- `GET /api/live/live-matches` - Currently live matches only
-- `GET /api/health` - System health check
-
-### Budget Management
-- `GET /budget` - Budget management dashboard
-- `POST /budget` - Create new budget configuration
-- `GET /budget/{id}` - View specific budget details
-- `GET /budget/{id}/chart-data` - Budget evolution data for charts
-- `GET /budget/{id}/opportunities` - Available betting opportunities
-- `POST /budget/{id}/bet` - Place bet using budget strategy
-- `POST /budget/{id}/resolve` - Resolve pending bets
-
-### Statistics & Analytics
-- `GET /statistics` - Prediction accuracy dashboard with interactive charts
-- `GET /api/statistics/monthly` - Monthly accuracy trends
-- `GET /api/statistics/leagues` - Performance by league
-
-## 🤖 Automated Tasks
-
-The application includes scheduled tasks for automation:
-
-- **Every 5 minutes**: Update live scores and match results
-- **Every 10 minutes**: Auto-finish completed matches
-- **Every 30 minutes**: Update prediction accuracy
-- **Every hour**: Generate new predictions and update statistics
-- **Daily**: Generate team statistics and clean old logs
-
-## 🔧 Maintenance
+Create the ML environment with:
 
 ```bash
-# Clear caches
-php artisan config:clear
-php artisan cache:clear
-php artisan view:clear
-
-# Clean old logs
-php artisan logs:clean --days=7
-
-# Check scheduler status
-php artisan schedule:list
+./setup_ml_env.sh
 ```
 
-## 📈 Performance Features
-
-- **Automated Caching**: Intelligent cache invalidation
-- **Daily Log Rotation**: Automatic cleanup with 7-day retention
-- **Database Optimization**: Indexed queries and efficient relationships
-- **Real-time Updates**: Observer pattern for automatic statistics
-
-## 🔒 Security
-
-- Environment variables for sensitive data
-- Input validation and sanitization
-- Rate limiting on API endpoints
-- Secure database connections
-
-## 🧪 Testing
+Or activate an existing environment:
 
 ```bash
-php artisan test
+source ml_env/bin/activate
 ```
 
-## 📝 API Integration
+Verify the environment:
 
-The system integrates with Football-API.org:
-- Rate limit: 10 requests/minute (free tier)
-- Supports multiple leagues and competitions
-- Real-time match data and statistics
+```bash
+python check_ml_env.py
+```
 
-## 🤝 Contributing
+## Training Enhanced v3
 
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+After importing the historical dataset:
 
-## 📄 License
+```bash
+ml_env/bin/python ml/enhanced_football_predictor.py train
+```
 
-This project is open source and available under the [MIT License](LICENSE).
+Generated binary model artifacts are stored under:
 
-## 🆘 Support
+```text
+ml/models/
+```
 
-For issues and questions:
-1. Check existing issues
-2. Create a new issue with detailed description
-3. Include environment details and error logs
+Binary `.pkl` artifacts are intentionally excluded from Git.
 
----
+The repository contains the code and dependency definitions necessary to reproduce training instead of versioning generated model binaries.
 
-**Built with ❤️ for football prediction enthusiasts**
-EOF < /dev/null
+## External Data Services
+
+### OpenFootball
+
+Used for reproducible historical training data.
+
+The ML training workflow does not require an external API key.
+
+### API-Sports / API-Football
+
+Used by the Laravel operational data layer.
+
+Configure when required:
+
+```env
+FOOTBALL_API_KEY=your_api_key_here
+FOOTBALL_API_BASE_URL=https://v3.football.api-sports.io
+```
+
+API availability and request limits depend on the external account and plan and are therefore not assumed by the ML training pipeline.
+
+### Football-Data.org
+
+The codebase also contains an experimental secondary integration used by parts of the Laravel statistics layer.
+
+It should not be considered a complete alternative historical-data pipeline.
+
+## Project Structure
+
+```text
+app/
+├── Console/Commands/
+├── Models/
+└── Services/
+    └── OpenFootball/
+
+config/
+database/
+├── migrations/
+└── schema/
+
+ml/
+├── enhanced_football_predictor.py
+├── football_predictor.py
+├── config.py
+├── requirements.txt
+└── models/
+
+tests/
+```
+
+## Testing Notes
+
+The repository contains Laravel unit and feature tests.
+
+The current legacy test setup uses SQLite, while one historical performance-index migration contains MySQL-specific index inspection SQL. That migration is not currently portable to SQLite and prevents the complete legacy test suite from migrating the test database successfully.
+
+This is separate from the Python Enhanced v3 training/evaluation pipeline.
+
+The Python environment and model scripts can be verified with:
+
+```bash
+ml_env/bin/python check_ml_env.py
+
+ml_env/bin/python -m py_compile \
+    ml/enhanced_football_predictor.py \
+    ml/football_predictor.py
+```
+
+## Current Scope and Limitations
+
+Enhanced v3 is currently an **offline 1X2 classification experiment**.
+
+Online Enhanced v3 inference is intentionally disabled until the same 40-feature point-in-time contract used during training can be reconstructed for live fixtures without introducing train/serve skew.
+
+Other current limitations:
+
+* the experiment currently focuses on Serie A;
+* probability calibration has not been optimized;
+* external API functionality depends on third-party service availability;
+* some older Laravel functionality predates the current Enhanced v3 ML pipeline;
+* the repository contains legacy application functionality that is being progressively separated from the reproducible ML experiment.
+
+## Engineering Focus
+
+This project is primarily intended to demonstrate work with:
+
+* Laravel service architecture;
+* Python/Laravel interoperability;
+* relational data modeling;
+* external APIs;
+* historical data ingestion;
+* idempotent import processes;
+* pandas-based data processing;
+* ML feature engineering;
+* prevention of temporal data leakage;
+* chronological model evaluation;
+* ensemble classification;
+* reproducible Python environments;
+* Git-based project maintenance.
+
+## Status
+
+Enhanced v3 experiment:
+
+```text
+Historical ingestion        ✓
+Point-in-time statistics    ✓
+Temporal dataset split      ✓
+Time-series cross-validation ✓
+Four-model ensemble         ✓
+Untouched final holdout     ✓
+Reproducible Python setup   ✓
+Online Enhanced v3 serving  Planned
+```

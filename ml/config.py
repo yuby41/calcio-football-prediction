@@ -29,27 +29,59 @@ def load_env_config(env_path: str = None) -> Dict[str, str]:
     return config
 
 def get_db_config() -> Dict[str, str]:
-    """Get database configuration from .env file"""
+    """Get database configuration from Laravel .env file."""
     env_config = load_env_config()
-    
-    db_connection = env_config.get('DB_CONNECTION', 'mysql')
-    
+
+    db_connection = env_config.get('DB_CONNECTION', 'sqlite')
+
     if db_connection == 'sqlite':
+        database = env_config.get(
+            'DB_DATABASE',
+            os.path.join(
+                os.path.dirname(__file__),
+                '..',
+                'database',
+                'database.sqlite'
+            )
+        )
+
+        if not os.path.isabs(database):
+            database = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    '..',
+                    database
+                )
+            )
+
         return {
             'type': 'sqlite',
-            'database': env_config.get('DB_DATABASE', 'database/database.sqlite')
+            'database': database
         }
-    else:
-        # For Homestead/Vagrant VM configuration
-        host = env_config.get('DB_HOST', 'localhost')
-        
-        # If running from within Homestead VM, use localhost
-        # If running from host machine, might need different host
-        return {
-            'type': 'mysql',
-            'host': host,
-            'port': int(env_config.get('DB_PORT', 3306)),
-            'user': env_config.get('DB_USERNAME', 'homestead'),
-            'password': env_config.get('DB_PASSWORD', 'secret'),
-            'database': env_config.get('DB_DATABASE', 'calcio')
-        }
+
+    required = [
+        'DB_HOST',
+        'DB_PORT',
+        'DB_USERNAME',
+        'DB_PASSWORD',
+        'DB_DATABASE',
+    ]
+
+    missing = [
+        key for key in required
+        if not env_config.get(key)
+    ]
+
+    if missing:
+        raise RuntimeError(
+            'Missing database configuration: ' + ', '.join(missing)
+        )
+
+    return {
+        'type': 'mysql',
+        'host': env_config['DB_HOST'],
+        'port': int(env_config['DB_PORT']),
+        'user': env_config['DB_USERNAME'],
+        'password': env_config['DB_PASSWORD'],
+        'database': env_config['DB_DATABASE']
+    }

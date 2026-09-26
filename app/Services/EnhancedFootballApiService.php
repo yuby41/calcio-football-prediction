@@ -26,7 +26,7 @@ use Carbon\Carbon;
 class EnhancedFootballApiService
 {
     private string $baseUrl;
-    private string $apiKey;
+    private ?string $apiKey;
     private string $timezone;
     private array $headers;
     private ApiQuotaManager $quotaManager;

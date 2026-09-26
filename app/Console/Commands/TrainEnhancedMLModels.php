@@ -16,142 +16,144 @@ class TrainEnhancedMLModels extends Command
     {
         $precisionThreshold = $this->option('precision-threshold');
         $backupExisting = $this->option('backup-existing');
-        
+
         $this->info("🚀 Iniciando entrenamiento de modelos ML optimizados...");
         $this->info("📊 Umbral de precisión requerido: {$precisionThreshold}%");
-        
+
         // Backup existing models if requested
         if ($backupExisting) {
             $this->backupExistingModels();
         }
-        
+
         // Verify Python environment
         if (!$this->verifyPythonEnvironment()) {
             $this->error("❌ Entorno Python no configurado correctamente");
             return 1;
         }
-        
+
         // Train enhanced models
         $trainingResults = $this->trainEnhancedModels();
-        
+
         if (!$trainingResults) {
             $this->error("❌ Error durante el entrenamiento de modelos");
             return 1;
         }
-        
+
         // Evaluate model performance
         $evaluation = $this->evaluateModelPerformance($trainingResults);
-        
+
         if ($evaluation['ensemble_accuracy'] * 100 < $precisionThreshold) {
             $this->warn("⚠️  Precisión del modelo ({$evaluation['ensemble_accuracy_percent']}%) por debajo del umbral ({$precisionThreshold}%)");
-            
+
             if (!$this->confirm('¿Desea continuar con el despliegue del modelo?')) {
                 $this->info("🔄 Entrenamiento cancelado. Restaurando modelos anteriores...");
                 $this->restoreBackupModels();
                 return 1;
             }
         }
-        
+
         // Deploy models if accuracy is acceptable
         $this->deployEnhancedModels($evaluation);
-        
+
         // Update system configuration
         $this->updateModelMetadata($evaluation);
-        
+
         // Generate comprehensive report
         $this->generateTrainingReport($evaluation);
-        
+
         $this->info("✅ Entrenamiento completado exitosamente!");
         $this->displayResults($evaluation);
-        
+
         return 0;
     }
 
     private function verifyPythonEnvironment(): bool
     {
         $this->info("🔍 Verificando entorno Python...");
-        
-        $mlPath = base_path('ml');
-        
-        // Check if Python is available
-        $pythonCheck = new Process(['python3', '--version']);
-        $pythonCheck->run();
-        
-        if (!$pythonCheck->isSuccessful()) {
-            $this->error("Python3 no está disponible");
+
+        $mlPath = config(
+            'ml_models.paths.ml_directory',
+            base_path('ml')
+        );
+
+        $python = config(
+            'ml_models.paths.python_env',
+            base_path('ml_env/bin/python')
+        );
+
+        // Validate configured Python interpreter
+        if (!is_file($python) || !is_executable($python)) {
+            $this->error(
+                "Python del entorno ML no encontrado o no ejecutable: {$python}"
+            );
+            $this->line("Ejecute ./setup_ml_env.sh para crear el entorno.");
+
             return false;
         }
-        
-        // Check if required files exist
+
+        // Check required ML files
         $requiredFiles = [
             'enhanced_football_predictor.py',
             'config.py',
-            'requirements.txt'
+            'requirements.txt',
         ];
-        
+
         foreach ($requiredFiles as $file) {
-            if (!file_exists($mlPath . '/' . $file)) {
-                $this->error("Archivo requerido no encontrado: {$file}");
+            $filePath = $mlPath . '/' . $file;
+
+            if (!is_file($filePath)) {
+                $this->error("Archivo requerido no encontrado: {$filePath}");
+
                 return false;
             }
         }
-        
-        // SECURITY FIX: Check Python dependencies with validated path
+
+        // Preserve existing path validation
         if (!$this->isValidMlPath($mlPath)) {
             $this->error("Invalid ML path detected");
+
             return false;
         }
-        
-        // Usar entorno virtual configurado definitivamente
-        $basePath = escapeshellarg(base_path());
-        $dependencyCheck = Process::fromShellCommandline(
-            "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && python -c \"import pandas, numpy, sklearn, xgboost, lightgbm, joblib; print('Dependencies OK')\"")
+
+        // Verify required dependencies using the configured virtual environment
+        $dependencyCheck = new Process(
+            [
+                $python,
+                '-c',
+                'import pandas, numpy, sklearn, xgboost, lightgbm, joblib; print("Dependencies OK")',
+            ],
+            base_path()
         );
-        
-        $dependencyCheck->setTimeout(30); // Shorter timeout
+
+        $dependencyCheck->setTimeout(30);
         $dependencyCheck->run();
-        
+
         if (!$dependencyCheck->isSuccessful()) {
-            $this->warn("⚠️  Algunas dependencias de Python pueden estar faltando");
-            
-            // SECURITY: Validate requirements.txt exists and is safe
-            $requirementsPath = $mlPath . '/requirements.txt';
-            if (!$this->validateRequirementsFile($requirementsPath)) {
-                $this->error("Invalid or unsafe requirements.txt file");
-                return false;
-            }
-            
-            $this->info("Ejecutando: pip install -r requirements.txt");
-            
-            // Usar entorno virtual para instalación de dependencias
-            $basePath = escapeshellarg(base_path());
-            $installProcess = Process::fromShellCommandline(
-                "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && pip install -r requirements.txt")
-            );
-            $installProcess->setTimeout(300); // 5 minutes timeout
-            $installProcess->run();
-            
-            if (!$installProcess->isSuccessful()) {
-                $this->error("Error instalando dependencias: " . $installProcess->getErrorOutput());
-                return false;
-            }
+            $this->error("❌ Faltan dependencias Python requeridas.");
+            $this->error(trim($dependencyCheck->getErrorOutput()));
+            $this->line("Ejecute ./setup_ml_env.sh para instalar las dependencias.");
+
+            return false;
         }
-        
-        $this->info("✅ Entorno Python verificado correctamente");
+
+        $this->info(
+            "✅ Entorno Python verificado correctamente: {$python}"
+        );
+
         return true;
     }
 
     private function backupExistingModels(): void
     {
         $this->info("💾 Respaldando modelos existentes...");
-        
+
         $mlPath = base_path('ml');
         $backupPath = $mlPath . '/models_backup_' . date('Y-m-d_H-i-s');
-        
+
         if (is_dir($mlPath . '/models')) {
             $backupProcess = new Process(['cp', '-r', 'models', $backupPath], $mlPath);
             $backupProcess->run();
-            
+
             if ($backupProcess->isSuccessful()) {
                 $this->info("✅ Modelos respaldados en: {$backupPath}");
             } else {
@@ -163,42 +165,54 @@ class TrainEnhancedMLModels extends Command
     private function trainEnhancedModels(): ?array
     {
         $this->info("🤖 Entrenando modelos optimizados...");
-        
+
         $mlPath = base_path('ml');
-        
+
         // Create progress bar
         $progressBar = $this->output->createProgressBar(5);
         $progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %message%');
         $progressBar->setMessage('Iniciando entrenamiento...');
         $progressBar->start();
-        
+
         // SECURITY FIX: Train enhanced models with path validation
         if (!$this->isValidMlPath($mlPath)) {
             $this->error("Invalid ML path for training");
             return null;
         }
-        
+
         // Validate Python script exists and is safe
         $scriptPath = $mlPath . '/enhanced_football_predictor.py';
         if (!$this->validatePythonScript($scriptPath)) {
             $this->error("Python script validation failed");
             return null;
         }
-        
+
         // Usar entorno virtual para entrenamiento
-        $basePath = escapeshellarg(base_path());
-        $mlPathEscaped = escapeshellarg($mlPath);
-        $trainingProcess = Process::fromShellCommandline(
-            "/bin/bash -c " . escapeshellarg("cd {$basePath} && source ml_env/bin/activate && python {$mlPathEscaped}/enhanced_football_predictor.py train")
+        $python = config(
+            'ml_models.paths.python_env',
+            base_path('ml_env/bin/python')
         );
-        
+
+        if (!is_file($python) || !is_executable($python)) {
+            $this->error(
+                "ML Python interpreter not found or not executable: {$python}"
+            );
+
+            return null;
+        }
+
+        $trainingProcess = new Process(
+            [$python, $scriptPath, 'train'],
+            base_path()
+        );
+
         $trainingProcess->setTimeout(1800); // 30 minutes timeout
         $trainingProcess->setEnv(['PYTHONPATH' => $mlPath]); // Set safe Python path
-        
+
         $output = '';
         $trainingProcess->run(function ($type, $buffer) use (&$output, $progressBar) {
             $output .= $buffer;
-            
+
             // Update progress based on output
             if (strpos($buffer, 'Loading enhanced data') !== false) {
                 $progressBar->setMessage('Cargando datos...');
@@ -217,19 +231,19 @@ class TrainEnhancedMLModels extends Command
                 $progressBar->advance();
             }
         });
-        
+
         $progressBar->finish();
         $this->newLine();
-        
+
         if (!$trainingProcess->isSuccessful()) {
             $this->error("Error durante el entrenamiento:");
             $this->error($trainingProcess->getErrorOutput());
             return null;
         }
-        
+
         // Parse training results from output
         $results = $this->parseTrainingOutput($output);
-        
+
         $this->info("✅ Entrenamiento completado");
         return $results;
     }
@@ -247,47 +261,47 @@ class TrainEnhancedMLModels extends Command
             'feature_count' => 0,
             'matches_trained' => 0
         ];
-        
+
         // Extract metrics from training output
         if (preg_match('/XGBoost Accuracy: ([\d.]+)/', $output, $matches)) {
             $results['xgb_accuracy'] = (float) $matches[1];
         }
-        
+
         if (preg_match('/LightGBM Accuracy: ([\d.]+)/', $output, $matches)) {
             $results['lgb_accuracy'] = (float) $matches[1];
         }
-        
+
         if (preg_match('/Neural Network Accuracy: ([\d.]+)/', $output, $matches)) {
             $results['nn_accuracy'] = (float) $matches[1];
         }
-        
+
         if (preg_match('/Random Forest Accuracy: ([\d.]+)/', $output, $matches)) {
             $results['rf_accuracy'] = (float) $matches[1];
         }
-        
+
         if (preg_match('/Enhanced Ensemble Accuracy: ([\d.]+)/', $output, $matches)) {
             $results['ensemble_accuracy'] = (float) $matches[1];
         }
-        
+
         if (preg_match('/Cross-validation Mean: ([\d.]+)/', $output, $matches)) {
             $results['cv_mean_accuracy'] = (float) $matches[1];
         }
-        
+
         if (preg_match('/Loaded (\d+) matches/', $output, $matches)) {
             $results['matches_trained'] = (int) $matches[1];
         }
-        
+
         if (preg_match('/Using (\d+) features/', $output, $matches)) {
             $results['feature_count'] = (int) $matches[1];
         }
-        
+
         return $results;
     }
 
     private function evaluateModelPerformance(array $trainingResults): array
     {
         $this->info("📊 Evaluando rendimiento de modelos...");
-        
+
         // Add percentage calculations and improvements
         $evaluation = $trainingResults;
         $evaluation['ensemble_accuracy_percent'] = round($trainingResults['ensemble_accuracy'] * 100, 2);
@@ -296,12 +310,12 @@ class TrainEnhancedMLModels extends Command
         $evaluation['nn_accuracy_percent'] = round($trainingResults['nn_accuracy'] * 100, 2);
         $evaluation['rf_accuracy_percent'] = round($trainingResults['rf_accuracy'] * 100, 2);
         $evaluation['cv_mean_percent'] = round($trainingResults['cv_mean_accuracy'] * 100, 2);
-        
+
         // Calculate improvement over baseline (42.8% current accuracy)
         $baselineAccuracy = 0.428;
         $improvement = ($trainingResults['ensemble_accuracy'] - $baselineAccuracy) / $baselineAccuracy * 100;
         $evaluation['improvement_percent'] = round($improvement, 1);
-        
+
         // Determine model quality
         if ($evaluation['ensemble_accuracy_percent'] >= 75) {
             $evaluation['quality_rating'] = 'Excelente';
@@ -314,30 +328,30 @@ class TrainEnhancedMLModels extends Command
         } else {
             $evaluation['quality_rating'] = 'Necesita Mejora';
         }
-        
+
         return $evaluation;
     }
 
     private function deployEnhancedModels(array $evaluation): void
     {
         $this->info("🚀 Desplegando modelos optimizados...");
-        
+
         $mlPath = base_path('ml');
         $modelsPath = $mlPath . '/models';
-        
+
         // Verify enhanced models exist
         $requiredFiles = [
             'enhanced_outcome_model.pkl',
-            'enhanced_scaler.pkl', 
+            'enhanced_scaler.pkl',
             'enhanced_metadata.json'
         ];
-        
+
         foreach ($requiredFiles as $file) {
             if (!file_exists($modelsPath . '/' . $file)) {
                 $this->warn("⚠️  Archivo de modelo no encontrado: {$file}");
             }
         }
-        
+
         // Create deployment timestamp
         file_put_contents($modelsPath . '/deployment_info.json', json_encode([
             'deployed_at' => now()->toISOString(),
@@ -348,14 +362,14 @@ class TrainEnhancedMLModels extends Command
             'matches_trained' => $evaluation['matches_trained'],
             'features_used' => $evaluation['feature_count']
         ], JSON_PRETTY_PRINT));
-        
+
         $this->info("✅ Modelos desplegados exitosamente");
     }
 
     private function updateModelMetadata(array $evaluation): void
     {
         $this->info("📝 Actualizando metadatos del sistema...");
-        
+
         // Log deployment for audit trail
         Log::info('Enhanced ML models deployed', [
             'accuracy' => $evaluation['ensemble_accuracy_percent'],
@@ -365,43 +379,43 @@ class TrainEnhancedMLModels extends Command
             'features_used' => $evaluation['feature_count'],
             'deployed_at' => now()
         ]);
-        
+
         $this->info("✅ Metadatos actualizados");
     }
 
     private function generateTrainingReport(array $evaluation): void
     {
         $reportPath = base_path('ENHANCED_ML_TRAINING_REPORT.md');
-        
+
         $report = "# Enhanced ML Models Training Report\n\n";
         $report .= "**Fecha de entrenamiento**: " . now()->format('Y-m-d H:i:s') . "\n";
         $report .= "**Versión del modelo**: 3.0.0-enhanced-outcomes\n\n";
-        
+
         $report .= "## 📊 Resultados del Entrenamiento\n\n";
         $report .= "### Precisión de Modelos Individuales\n";
         $report .= "- **XGBoost**: {$evaluation['xgb_accuracy_percent']}%\n";
         $report .= "- **LightGBM**: {$evaluation['lgb_accuracy_percent']}%\n";
         $report .= "- **Neural Network**: {$evaluation['nn_accuracy_percent']}%\n";
         $report .= "- **Random Forest**: {$evaluation['rf_accuracy_percent']}%\n\n";
-        
+
         $report .= "### Rendimiento del Ensemble\n";
         $report .= "- **Precisión del Ensemble**: {$evaluation['ensemble_accuracy_percent']}%\n";
         $report .= "- **Validación cruzada**: {$evaluation['cv_mean_percent']}% (±" . number_format($evaluation['cv_std_accuracy'], 3) . ")\n";
         $report .= "- **Mejora sobre baseline**: {$evaluation['improvement_percent']}%\n";
         $report .= "- **Calificación de calidad**: {$evaluation['quality_rating']}\n\n";
-        
+
         $report .= "## 📈 Datos de Entrenamiento\n";
         $report .= "- **Partidos utilizados**: {$evaluation['matches_trained']}\n";
         $report .= "- **Características utilizadas**: {$evaluation['feature_count']}\n";
         $report .= "- **Algoritmos**: XGBoost + LightGBM + Neural Network + Random Forest\n\n";
-        
+
         $report .= "## 🎯 Mejoras Implementadas\n";
         $report .= "1. **Características avanzadas**: 35+ features específicas para predicción de resultados\n";
         $report .= "2. **Ensemble optimizado**: Pesos dinámicos basados en rendimiento individual\n";
         $report .= "3. **Normalización por liga**: Z-scores para comparación entre ligas\n";
         $report .= "4. **Validación temporal**: Evaluación con series temporales\n";
         $report .= "5. **Regularización mejorada**: Prevención de overfitting\n\n";
-        
+
         if ($evaluation['improvement_percent'] > 0) {
             $report .= "## ✅ Despliegue Exitoso\n";
             $report .= "Los modelos han sido desplegados exitosamente con una mejora del {$evaluation['improvement_percent']}% sobre el sistema anterior.\n\n";
@@ -409,15 +423,15 @@ class TrainEnhancedMLModels extends Command
             $report .= "## ⚠️ Análisis Requerido\n";
             $report .= "Los modelos muestran una precisión menor al baseline. Se recomienda análisis adicional de los datos y características.\n\n";
         }
-        
+
         $report .= "## 🔄 Próximos Pasos\n";
         $report .= "1. Monitorear rendimiento en producción\n";
         $report .= "2. Recopilar feedback de precisión en tiempo real\n";
         $report .= "3. Reentrenar modelos con datos frescos semanalmente\n";
         $report .= "4. Considerar incorporación de datos adicionales (lesiones, transferencias, etc.)\n";
-        
+
         file_put_contents($reportPath, $report);
-        
+
         $this->info("📄 Reporte generado: {$reportPath}");
     }
 
@@ -426,22 +440,22 @@ class TrainEnhancedMLModels extends Command
         $this->newLine();
         $this->info("🎉 RESULTADOS DEL ENTRENAMIENTO");
         $this->line("════════════════════════════════");
-        
+
         $this->line("📊 <fg=cyan>Precisión del Ensemble:</fg=cyan> <fg=white;options=bold>{$evaluation['ensemble_accuracy_percent']}%</fg=white;options=bold>");
         $this->line("📈 <fg=cyan>Mejora sobre baseline:</fg=cyan> <fg=white;options=bold>{$evaluation['improvement_percent']}%</fg=white;options=bold>");
         $this->line("⭐ <fg=cyan>Calificación:</fg=cyan> <fg=white;options=bold>{$evaluation['quality_rating']}</fg=white;options=bold>");
         $this->line("🎯 <fg=cyan>Partidos entrenados:</fg=cyan> <fg=white;options=bold>{$evaluation['matches_trained']}</fg=white;options=bold>");
         $this->line("🔧 <fg=cyan>Características:</fg=cyan> <fg=white;options=bold>{$evaluation['feature_count']}</fg=white;options=bold>");
-        
+
         $this->newLine();
         $this->line("🤖 <fg=yellow>Modelos Individuales:</fg=yellow>");
         $this->line("   • XGBoost: {$evaluation['xgb_accuracy_percent']}%");
         $this->line("   • LightGBM: {$evaluation['lgb_accuracy_percent']}%");
         $this->line("   • Neural Network: {$evaluation['nn_accuracy_percent']}%");
         $this->line("   • Random Forest: {$evaluation['rf_accuracy_percent']}%");
-        
+
         $this->newLine();
-        
+
         if ($evaluation['improvement_percent'] > 10) {
             $this->info("🚀 ¡Excelente mejora! Los modelos optimizados superan significativamente el sistema anterior.");
         } elseif ($evaluation['improvement_percent'] > 0) {
@@ -457,7 +471,7 @@ class TrainEnhancedMLModels extends Command
         // Implementation for restoring backup models
         $this->info("✅ Modelos anteriores restaurados");
     }
-    
+
     /**
      * SECURITY: Validate ML path is within expected boundaries
      */
@@ -466,11 +480,11 @@ class TrainEnhancedMLModels extends Command
         $basePath = base_path('ml');
         $realPath = realpath($path);
         $realBasePath = realpath($basePath);
-        
+
         // Ensure path exists and is within ml directory
         return $realPath && $realBasePath && strpos($realPath, $realBasePath) === 0;
     }
-    
+
     /**
      * SECURITY: Validate requirements.txt file is safe
      */
@@ -479,12 +493,12 @@ class TrainEnhancedMLModels extends Command
         if (!file_exists($filePath) || !is_readable($filePath)) {
             return false;
         }
-        
+
         $content = file_get_contents($filePath);
         if ($content === false) {
             return false;
         }
-        
+
         // Check for suspicious patterns
         $dangerousPatterns = [
             'subprocess',
@@ -501,7 +515,7 @@ class TrainEnhancedMLModels extends Command
             '/bin/',
             '/usr/'
         ];
-        
+
         foreach ($dangerousPatterns as $pattern) {
             if (stripos($content, $pattern) !== false) {
                 Log::warning("Suspicious pattern found in requirements.txt", [
@@ -511,10 +525,10 @@ class TrainEnhancedMLModels extends Command
                 return false;
             }
         }
-        
+
         return true;
     }
-    
+
     /**
      * SECURITY: Validate Python script is safe to execute
      */
@@ -523,7 +537,7 @@ class TrainEnhancedMLModels extends Command
         if (!file_exists($scriptPath) || !is_readable($scriptPath)) {
             return false;
         }
-        
+
         // Check file size (prevent extremely large files)
         $fileSize = filesize($scriptPath);
         if ($fileSize === false || $fileSize > 1024 * 1024) { // 1MB limit
@@ -533,13 +547,13 @@ class TrainEnhancedMLModels extends Command
             ]);
             return false;
         }
-        
+
         // Basic content validation
         $content = file_get_contents($scriptPath, false, null, 0, 10000); // Read first 10KB
         if ($content === false) {
             return false;
         }
-        
+
         // Check for extremely dangerous patterns (allowing legitimate ML script imports)
         $dangerousPatterns = [
             'os.system(',
@@ -553,7 +567,7 @@ class TrainEnhancedMLModels extends Command
             'http.server',
             'ftplib'
         ];
-        
+
         foreach ($dangerousPatterns as $pattern) {
             if (stripos($content, $pattern) !== false) {
                 Log::warning("Dangerous pattern found in Python script", [
@@ -563,7 +577,7 @@ class TrainEnhancedMLModels extends Command
                 return false;
             }
         }
-        
+
         return true;
     }
 }

@@ -32,3 +32,5 @@ claude_env/
 /database/*.sqlite-*
 .claude/settings.local.json
 /public/build/
+ml/models/*.pkl
+ml/models_backup_*/
